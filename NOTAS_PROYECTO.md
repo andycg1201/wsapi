@@ -10,75 +10,62 @@ Sistema de notificaciones WhatsApp **sin UltraMsg** (para ahorrar costo). Usa Ba
 
 ---
 
-## Estado actual
+## Estado actual ✅ FUNCIONANDO
 
-### ✅ Lo que ya funciona
+### Lo que ya funciona
 
-- **1 número vinculado** - Escaneaste el QR y quedó conectado
-- **API operativa** - Endpoint `/messages/chat` recibe `to` y `body`
-- **Traccar configurado** - URL: `http://localhost:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%`
-- **Panel de vinculación** - `http://localhost:3000/pair` para vincular más números
+- **Notificaciones operativas** - Traccar envía a WSAPI y los mensajes llegan a WhatsApp
+- **ngrok temporal** - Traccar (VPS de terceros) se conecta vía ngrok a tu PC
+- **1 número vinculado** (numero_1) - Sesión conectada
+- **URL para Traccar:** `https://[tu-url-ngrok].ngrok-free.app/messages/chat?to=%NUMBER%&body=%MESSAGE%&priority=10`
 
-### 🔧 Fix aplicado
+### Configuración actual
 
-WhatsApp rechazaba la plataforma WEB (Connection Failure). Se instaló Baileys desde el fork con el fix:
-- En `package.json`: `"@whiskeysockets/baileys": "github:kobie3717/Baileys#fix/405-platform-macos"`
-
-### 📁 Estructura importante
-
-- `config/sessions.json` - Lista de sesiones (numero_1, numero_2, etc.)
-- `auth_sessions/` - Credenciales de WhatsApp por sesión (no subir a git)
-- `src/baileys-manager.js` - Lógica round-robin
-- `src/index.js` - API y panel web
-
----
-
-## Cómo funciona el round-robin
-
-- Las sesiones son los **números que envían** (los WhatsApp vinculados)
-- El `to` es siempre el **cliente que recibe** (configurado en Traccar)
-- El sistema **rota automáticamente** entre sesiones: mensaje 1 → numero_1, mensaje 2 → numero_2, etc.
-- No hay que configurar qué sesión usa cada mensaje
+- **Traccar:** En VPS de terceros (sin acceso SSH)
+- **WSAPI:** Corriendo en tu PC
+- **Túnel:** ngrok expone localhost:3000 a internet
+- **Limitación:** Tu PC debe estar encendida 24/7. La URL ngrok cambia si reinicias.
 
 ---
 
 ## Para continuar mañana
 
-### 1. Probar envío de notificación
+### Opción A: Seguir con ngrok (temporal)
 
-```
-http://localhost:3000/messages/chat?to=52XXXXXXXXXX&body=Prueba
-```
-(Reemplazar con tu número real)
+1. Iniciar WSAPI: `npm start`
+2. Iniciar ngrok: `ngrok http 3000`
+3. Si la URL cambió, actualizar con el proveedor de Traccar
 
-### 2. Vincular más números (opcional)
+### Opción B: Comprar VPS propio (recomendado para producción)
 
-- Editar `config/sessions.json` y añadir: `{ "id": "numero_2", "label": "Número 2", "enabled": true }`
-- Reiniciar servidor
-- Ir a `/pair` y escanear QR
+- Ver **GUIA_VPS.md** - Sección "Cuándo comprar un VPS"
+- Costo: ~4-6 USD/mes
+- WSAPI correría 24/7 sin depender de tu PC
+- El proveedor de Traccar cambiaría la URL a tu IP del VPS
 
-### 3. Desplegar en VPS (cuando esté listo)
+### Vincular más números
 
-- Seguir **GUIA_VPS.md**
-- Subir el proyecto al VPS
-- Configurar PM2 para que corra 24/7
-- Cambiar la URL en Traccar a la IP del VPS
+- Ir a `/pair` (o `http://[ngrok-url]/pair`)
+- Escanear QR de numero_2, 3, 4, 5 para distribuir carga
 
-### 4. Comandos útiles
+---
+
+## Comandos útiles
 
 ```bash
-npm start          # Iniciar servidor
-taskkill /F /IM node.exe   # Detener (Windows)
+npm start                    # Iniciar WSAPI
+ngrok http 3000              # Exponer a internet (con ngrok instalado)
+taskkill /F /IM node.exe     # Detener Node (Windows)
 ```
 
 ---
 
-## Pendientes / recordatorios
+## Archivos clave
 
-- [ ] Probar notificación real desde Traccar (evento de geocerca, etc.)
-- [ ] Vincular los 5 números si se quiere distribuir carga
-- [ ] Desplegar en VPS cuando se use en producción
-- [ ] El archivo `auth_sessions/` no debe subirse a GitHub (está en .gitignore)
+- `config/sessions.json` - Sesiones configuradas
+- `auth_sessions/` - Credenciales WhatsApp (no subir a git)
+- `CONFIGURAR_TRACCAR.md` - Guía Traccar (SMS POST)
+- `GUIA_VPS.md` - Comprar VPS e instalar WSAPI
 
 ---
 

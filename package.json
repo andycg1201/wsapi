@@ -12,6 +12,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@fastify/formbody": "^8.0.0",
     "@hapi/boom": "^10.0.1",
     "@whiskeysockets/baileys": "github:kobie3717/Baileys#fix/405-platform-macos",
     "fastify": "^4.28.0",

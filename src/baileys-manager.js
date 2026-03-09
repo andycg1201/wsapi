@@ -15,9 +15,14 @@ let roundRobinIndex = 0;
 
 /**
  * Formatea número al JID de WhatsApp
+ * Debe incluir código de país (ej: 52 para México, 57 Colombia)
  */
 function toJid(phone) {
-  const cleaned = String(phone).replace(/\D/g, '');
+  let cleaned = String(phone).replace(/\D/g, '');
+  // Si tiene 10 dígitos y empieza con 1-9, asumir México (52)
+  if (cleaned.length === 10 && /^[1-9]/.test(cleaned)) {
+    cleaned = '52' + cleaned;
+  }
   return `${cleaned}@s.whatsapp.net`;
 }
 

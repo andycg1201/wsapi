@@ -1,12 +1,38 @@
-# Guía: Comprar y configurar VPS para WSAPI
+# Guía: Comprar VPS e instalar WSAPI
 
-Esta guía te lleva paso a paso desde cero hasta tener WSAPI funcionando en un servidor 24/7.
+Esta guía te lleva desde la compra del servidor hasta tener WSAPI funcionando 24/7.
+
+---
+
+## ¿Cuándo necesitas un VPS?
+
+| Situación | Solución |
+|-----------|----------|
+| **Traccar en VPS de terceros** (tu caso) | ngrok (temporal) o **VPS propio** (definitivo) |
+| **Pruebas / desarrollo** | ngrok gratis o localhost |
+| **Producción 24/7 sin depender de tu PC** | **VPS propio** |
+
+### ¿Por qué comprar un VPS?
+
+- Tu PC no necesita estar encendida 24/7
+- URL fija (no cambia como ngrok gratis)
+- Más estable y profesional
+- Costo bajo: ~4-6 USD/mes
 
 ---
 
 ## 1. Comprar el VPS
 
-### Opción A: Hetzner (recomendado, más económico)
+### Comparativa de proveedores
+
+| Proveedor | Plan | Precio | RAM | Recomendación |
+|-----------|------|--------|-----|---------------|
+| **Hetzner** | CX22 | ~4 €/mes | 2 GB | Mejor relación calidad-precio |
+| **DigitalOcean** | Basic | $6/mes | 1 GB | Muy usado, documentación amplia |
+| **Contabo** | VPS S | ~4 €/mes | 4 GB | Mucho RAM, soporte variable |
+| **Vultr** | Cloud Compute | $6/mes | 1 GB | Buen rendimiento |
+
+### Paso 1.1: Hetzner (recomendado)
 
 1. Entra a [hetzner.com](https://www.hetzner.com)
 2. **Regístrate** → Crear cuenta
@@ -18,7 +44,7 @@ Esta guía te lleva paso a paso desde cero hasta tener WSAPI funcionando en un s
    - Añade tu SSH key o deja que te genere una
 5. **Create & Buy**
 
-### Opción B: DigitalOcean
+### Paso 1.2: DigitalOcean
 
 1. [digitalocean.com](https://www.digitalocean.com) → Sign up
 2. **Create** → **Droplets**
@@ -28,7 +54,7 @@ Esta guía te lleva paso a paso desde cero hasta tener WSAPI funcionando en un s
    - Región más cercana a ti
 4. **Create Droplet**
 
-### Opción C: Contabo (muy barato)
+### Paso 1.3: Contabo (más barato, más RAM)
 
 1. [contabo.com](https://contabo.com) → VPS
 2. El plan más bajo (~4-5 €/mes) suele incluir 4 GB RAM
@@ -171,23 +197,37 @@ ufw enable
 
 ## 8. Vincular los números de WhatsApp
 
+### Opción A: Copiar sesión existente (si ya vinculaste en tu PC)
+
+Si ya tienes `auth_sessions/numero_1` en tu PC funcionando:
+1. Usa WinSCP o FileZilla para conectar al VPS
+2. Sube la carpeta `auth_sessions/numero_1` a `/opt/wsapi/auth_sessions/`
+3. Reinicia: `pm2 restart wsapi`
+4. No necesitas escanear QR de nuevo
+
+### Opción B: Vincular desde cero
+
 1. Abre en tu navegador: `http://TU_IP:3000/pair`
-2. Para cada uno de los 5 números: clic en **Mostrar QR**
+2. Para cada número: clic en **Mostrar QR**
 3. En cada celular: **WhatsApp** → **Configuración** → **Dispositivos vinculados** → **Vincular dispositivo**
-4. Escanea el QR que aparece en pantalla
-5. Cuando todos muestren "✓ Conectado", ya está listo
+4. Escanea el QR
+5. Cuando muestren "✓ Conectado", listo
 
 ---
 
-## 9. Configurar Traccar
+## 9. Configurar Traccar con tu proveedor
 
-En la configuración de notificaciones de Traccar, cambia la URL a:
+Pide a tu proveedor de Traccar que configure la URL (formato compatible con UltraMsg):
 
 ```
-http://TU_IP:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%
+http://TU_IP:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%&priority=10
 ```
 
-Sustituye `TU_IP` por la IP de tu VPS.
+Sustituye `TU_IP` por la IP pública de tu VPS.
+
+**Si Traccar usa POST** (template sms.http), configurar:
+- URL: `http://TU_IP:3000/messages/chat`
+- Template: `to={phone}&body={message}`
 
 ---
 

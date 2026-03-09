@@ -4,6 +4,7 @@
  */
 
 import Fastify from 'fastify';
+import formBody from '@fastify/formbody';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -19,6 +20,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fastify = Fastify({ logger: true });
 const PORT = process.env.PORT || 3000;
 
+await fastify.register(formBody); // Para recibir POST form-urlencoded de Traccar
+
 // Iniciar sesiones Baileys
 await startAll();
 
@@ -28,7 +31,9 @@ await startAll();
  */
 async function handleNotify(request, reply) {
   const to = request.query?.to || request.body?.to;
-  const body = request.query?.body || request.body?.body;
+  const body = request.query?.body || request.body?.body || request.body?.message;
+
+  request.log.info({ to, bodyLength: body?.length }, 'Notificación recibida');
 
   if (!to || !body) {
     return reply.status(400).send({
@@ -38,9 +43,10 @@ async function handleNotify(request, reply) {
 
   try {
     const result = await sendMessage(to, body);
+    request.log.info({ to, sessionId: result.sessionId }, 'Mensaje enviado OK');
     return reply.send({ success: true, sessionId: result.sessionId });
   } catch (err) {
-    request.log.error(err);
+    request.log.error({ err, to }, 'Error enviando mensaje');
     return reply.status(502).send({ error: err.message });
   }
 }
@@ -57,6 +63,19 @@ fastify.get('/', async (request, reply) => {
 
 // Verificar versión (para confirmar que corre el código correcto)
 fastify.get('/version', async () => ({ version: '2.0.0-baileys', hasPair: true }));
+
+// Probar envío manualmente: GET /test-send?to=521234567890&body=Hola
+fastify.get('/test-send', async (request, reply) => {
+  const to = request.query?.to;
+  const body = request.query?.body || 'Prueba desde WSAPI';
+  if (!to) return reply.status(400).send({ error: 'Falta parámetro: to (ej: to=521234567890)' });
+  try {
+    const result = await sendMessage(to, body);
+    return reply.send({ success: true, sessionId: result.sessionId, message: 'Revisa WhatsApp' });
+  } catch (err) {
+    return reply.status(502).send({ error: err.message });
+  }
+});
 
 // API
 fastify.all('/messages/chat', handleNotify);
