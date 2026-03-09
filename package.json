@@ -1,0 +1,20 @@
+{
+  "name": "wsapi-notify-router",
+  "version": "2.0.0",
+  "description": "Router de notificaciones WhatsApp - múltiples números con Baileys (sin UltraMsg)",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "github:kobie3717/Baileys#fix/405-platform-macos",
+    "fastify": "^4.28.0",
+    "qrcode": "^1.5.4"
+  }
+}
