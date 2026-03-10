@@ -1,0 +1,4 @@
+[
+  { "id": "numero_1", "label": "Número 1", "enabled": true },
+  { "id": "numero_2", "label": "Número 2", "enabled": true, "fixed": true }
+]

@@ -24,19 +24,40 @@ npm start
 
 ## URL para Traccar
 
-En la configuración de notificaciones de Traccar, usa:
+**Dinámica** (round-robin entre números): Enzanoia, Transsteri, etc.
+```
+http://TU_IP:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%&priority=10
+```
 
+**Fija** (solo un número): Contax u otra cuenta que requiera número exclusivo.
 ```
-http://TU_IP_O_DOMINIO:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%
+http://TU_IP:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%&priority=10&session=numero_3
 ```
+
+Para sesiones fijas, en `config/sessions.json` añade `"fixed": true` al número correspondiente.
 
 ## Agregar más números
 
-1. Edita `config/sessions.json` y añade: `{ "id": "numero_6", "label": "Número 6", "enabled": true }`
-2. Reinicia el servicio
-3. Ve a `/pair` y escanea el QR del nuevo número
+- En el panel `/pair`: clic en el botón **+** (botón circular verde).
+- Se crea una sesión con ID automático. Escanea el QR.
+- Al vincular, se muestran automáticamente el número y el nombre de WhatsApp.
 
-O usa la API: `POST /api/sessions` con `{ "id": "numero_6", "label": "Número 6" }`
+O usa la API: `POST /api/sessions` con body vacío `{}` o `{ "id": "numero_6", "label": "Número 6" }`
+
+## Ver grupos y enviar a grupos
+
+- Para sesiones conectadas: clic en **Ver grupos** para listar y copiar IDs.
+- Enviar a grupo: usa el ID completo como `to`, ej. `to=1234567890-9876543210@g.us`
+
+## Exclusiva vs Dinámica
+
+- Cada sesión muestra **Exclusiva** o **Dinámica** (clic para alternar).
+- **Exclusiva:** solo se usa cuando envías `?session=numero_X`.
+- **Dinámica:** entra en round-robin entre todas las dinámicas.
+
+## Eliminar sesión
+
+- Clic en el icono 🗑 de la sesión → ingresar PIN **1980** → Eliminar.
 
 ## Despliegue en VPS
 
@@ -46,9 +67,12 @@ Ver **[GUIA_VPS.md](GUIA_VPS.md)** para comprar y configurar el servidor paso a 
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET/POST | `/messages/chat` | Enviar notificación (`to`, `body`) |
+| GET/POST | `/messages/chat` | Enviar notificación (`to`, `body`, `session`) |
 | GET/POST | `/notify` | Igual que arriba |
 | GET | `/health` | Estado + sesiones conectadas |
 | GET | `/pair` | Panel web para vincular números |
 | GET | `/api/sessions` | Estado de sesiones (JSON) |
 | POST | `/api/sessions` | Añadir nueva sesión |
+| PATCH | `/api/sessions/:id` | Cambiar exclusiva (body: `{ "fixed": true }`) |
+| DELETE | `/api/sessions/:id` | Eliminar sesión (body: `{ "pin": "1980" }`) |
+| GET | `/api/sessions/:id/groups` | Lista grupos de la sesión |
