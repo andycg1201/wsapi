@@ -1,7 +1,29 @@
 [
-  { "id": "numero_1", "label": "Número 1", "enabled": true },
-  { "id": "numero_2", "label": "Número 2", "enabled": true },
-  { "id": "numero_3", "label": "Número 3", "enabled": true },
-  { "id": "numero_4", "label": "Número 4", "enabled": true },
-  { "id": "numero_5", "label": "Número 5", "enabled": true }
+  {
+    "id": "numero_1",
+    "label": "Ricardo A",
+    "enabled": true,
+    "phone": "573205257502",
+    "fixed": true
+  },
+  {
+    "id": "numero_2",
+    "label": "Número 2",
+    "enabled": true
+  },
+  {
+    "id": "numero_3",
+    "label": "Número 3",
+    "enabled": true
+  },
+  {
+    "id": "numero_4",
+    "label": "Número 4",
+    "enabled": true
+  },
+  {
+    "id": "numero_5",
+    "label": "Número 5",
+    "enabled": true
+  }
 ]
