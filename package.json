@@ -14,7 +14,7 @@
   "dependencies": {
     "@fastify/formbody": "^6.0.0",
     "@hapi/boom": "^10.0.1",
-    "@whiskeysockets/baileys": "github:kobie3717/Baileys#fix/405-platform-macos",
+    "@whiskeysockets/baileys": "^6.7.0",
     "fastify": "^4.28.0",
     "qrcode": "^1.5.4"
   }
