@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "postinstall": "patch-package"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -14,8 +15,11 @@
   "dependencies": {
     "@fastify/formbody": "^7.2.0",
     "@hapi/boom": "^10.0.1",
-    "@whiskeysockets/baileys": "^6.7.0",
+    "baileys": "6.7.21",
     "fastify": "^4.28.0",
     "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "patch-package": "^8.0.1"
   }
 }

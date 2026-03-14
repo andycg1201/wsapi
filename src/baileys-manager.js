@@ -2,16 +2,22 @@
  * Gestor de múltiples sesiones Baileys con round-robin
  */
 
-import makeWASocket, { useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
+import { makeWASocket, useMultiFileAuthState, DisconnectReason } from 'baileys';
 import { Boom } from '@hapi/boom';
 import fs from 'fs';
 import path from 'path';
 import QRCode from 'qrcode';
 
 const AUTH_BASE = path.join(process.cwd(), 'auth_sessions');
-let sessions = new Map(); // id -> { sock, connected, qr, label }
+let sessions = new Map(); // id -> { sock, connected, qr, label, connecting }
 let config = [];
 let roundRobinIndex = 0;
+
+/** Verifica si la sesión ya tiene credenciales guardadas */
+function hasExistingAuth(sessionId) {
+  const credsPath = path.join(AUTH_BASE, sessionId, 'creds.json');
+  return fs.existsSync(credsPath);
+}
 
 /** Extrae número de teléfono del JID (ej: 573205257502:7@s.whatsapp.net -> 573205257502) */
 function jidToPhone(jid) {
@@ -83,11 +89,14 @@ async function connectSession(sessionConfig) {
 
   const { state, saveCreds } = await useMultiFileAuthState(authPath);
 
+  // WhatsApp rechaza WEB/Ubuntu; requiere MACOS para vincular (Issue #2364)
   const sock = makeWASocket({
     auth: state,
+    browser: ['Mac OS', 'Chrome', '14.4.1'],
+    printQRInTerminal: false,
   });
 
-  sessions.set(id, { sock, connected: false, qr: null, label: label || id });
+  sessions.set(id, { sock, connected: false, qr: null, label: label || id, connecting: true });
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
@@ -96,12 +105,14 @@ async function connectSession(sessionConfig) {
     if (qr) {
       entry.qr = qr;
       entry.connected = false;
+      entry.connecting = false;
       console.log(`[${id}] QR generado - visible en /pair`);
     }
 
     if (connection === 'open') {
       entry.connected = true;
       entry.qr = null;
+      entry.connecting = false;
       console.log(`✓ [${id}] Conectado`);
       setImmediate(() => {
         const me = state.creds?.me;
@@ -118,6 +129,7 @@ async function connectSession(sessionConfig) {
 
     if (connection === 'close') {
       entry.connected = false;
+      entry.connecting = false;
       const statusCode = (lastDisconnect?.error instanceof Boom)
         ? lastDisconnect.error.output?.statusCode
         : null;
@@ -149,21 +161,42 @@ async function connectSession(sessionConfig) {
 }
 
 /**
- * Inicia todas las sesiones configuradas (con pausa entre cada una para evitar Connection Failure)
+ * Inicia solo las sesiones que ya tienen credenciales (evita Connection Failure por saturación).
+ * Las sesiones sin vincular se conectan on-demand cuando el usuario pide el QR.
  */
 export async function startAll() {
   loadConfig();
-  for (let i = 0; i < config.length; i++) {
+  const withAuth = config.filter((c) => hasExistingAuth(c.id));
+  const withoutAuth = config.filter((c) => !hasExistingAuth(c.id));
+  if (withAuth.length) {
+    console.log(`Iniciando ${withAuth.length} sesión(es) con auth existente...`);
+  }
+  if (withoutAuth.length) {
+    console.log(`${withoutAuth.length} sesión(es) pendiente(s) - conectarán al pedir QR`);
+  }
+  for (let i = 0; i < withAuth.length; i++) {
     try {
-      await connectSession(config[i]);
-      // Pausa de 8 segundos entre sesiones para no saturar la conexión a WhatsApp
-      if (i < config.length - 1) {
-        await new Promise((r) => setTimeout(r, 8000));
+      await connectSession(withAuth[i]);
+      if (i < withAuth.length - 1) {
+        await new Promise((r) => setTimeout(r, 5000));
       }
     } catch (err) {
-      console.error(`Error iniciando ${config[i].id}:`, err.message);
+      console.error(`Error iniciando ${withAuth[i].id}:`, err.message);
     }
   }
+}
+
+/**
+ * Conecta una sesión bajo demanda (cuando el usuario pide el QR).
+ * Evita saturar con múltiples conexiones simultáneas.
+ */
+export function ensureSessionConnected(sessionId) {
+  const entry = sessions.get(sessionId);
+  if (entry?.sock) return; // ya conectada o intentando
+  const sessionConfig = config.find((c) => c.id === sessionId);
+  if (!sessionConfig) return;
+  console.log(`[${sessionId}] Conectando bajo demanda (QR solicitado)...`);
+  connectSession(sessionConfig);
 }
 
 /**

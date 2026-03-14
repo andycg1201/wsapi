@@ -18,6 +18,7 @@ import {
   validateDeletePin,
   setSessionFixed,
   loadConfig,
+  ensureSessionConnected,
 } from './baileys-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -378,6 +379,7 @@ fastify.get('/pair/', pairHandler);
 // API para el panel
 fastify.get('/api/sessions', async () => ({ sessions: getSessionsStatus() }));
 fastify.get('/api/qr/:id', async (request, reply) => {
+  ensureSessionConnected(request.params.id);
   const qr = await getQrAsImage(request.params.id);
   return reply.send({ qr: qr || null });
 });
