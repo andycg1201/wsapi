@@ -65,7 +65,9 @@ Si no aparece, Traccar sigue sin llegar a WSAPI. Revisa:
 
 ## Si Traccar está en un VPS/servidor externo
 
-Si Traccar corre en un **VPS en la nube**, la IP `192.168.100.5` no será accesible. Opciones:
+Si Traccar corre en un **VPS en la nube**, la IP local no será accesible. Opciones:
 
 1. **Instalar WSAPI en el mismo VPS** (recomendado): sigue GUIA_VPS.md
-2. Usar **ngrok** o similar para exponer tu WSAPI local a internet (solo para pruebas)
+2. **WSAPI en Pi + ngrok** (configuración actual): Traccar usa la URL pública de ngrok:
+   - URL: `https://izaiah-multiaxial-mostly.ngrok-free.dev/messages/chat`
+   - Template: `to={phone}&body={message}`
