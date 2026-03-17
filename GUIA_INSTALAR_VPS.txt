@@ -1,0 +1,166 @@
+================================================================================
+  GUÍA: INSTALAR WSAPI EN UN NUEVO VPS (Hetzner u otro)
+  Sin ayuda externa - Todo lo necesario paso a paso
+================================================================================
+
+=== 1. CREAR EL SERVIDOR (Hetzner) ===
+
+1.1 Entra a https://console.hetzner.cloud
+1.2 Add Server
+1.3 Ubicación: Nuremberg o Falkenstein
+1.4 Imagen: Ubuntu 24.04
+1.5 Tipo: CX22 o CPX22 (~4-6 €/mes)
+1.6 Añade tu SSH key (opcional pero recomendado)
+1.7 Networking: Public IPv4 e IPv6 (dejar por defecto)
+1.8 Volumes y Firewalls: omitir
+1.9 Name: wsapi-vps (o el que prefieras)
+1.10 Create & Buy now
+1.11 Anota la IP que te asignen (ej: 46.225.142.215)
+
+
+=== 2. CONECTAR POR SSH ===
+
+Desde PowerShell (Windows) o terminal:
+
+    ssh root@TU_IP
+
+(Sustituye TU_IP por la IP del servidor. Ej: ssh root@46.225.142.215)
+
+Si añadiste SSH key: entra sin contraseña.
+Si no: usa la contraseña que Hetzner envió por email.
+
+
+=== 3. SI OLVIDASTE LA CONTRASEÑA ===
+
+3.1 Hetzner → tu servidor → pestaña Rescue
+3.2 Enable Rescue & Power Cycle
+3.3 Esperar 1-2 min
+3.4 Console (icono terminal arriba derecha)
+3.5 Login: root | Contraseña: la que muestra la página Rescue
+3.6 Ejecutar:
+    mount /dev/sda1 /mnt
+    chroot /mnt
+    passwd root
+    (escribe nueva contraseña dos veces)
+    exit
+    reboot
+3.7 Tras reinicio: Rescue → Disable Rescue & Power Cycle
+3.8 Conectar de nuevo: ssh root@TU_IP con la nueva contraseña
+
+
+=== 4. INSTALAR WSAPI ===
+
+Una vez conectado, ejecutar estos comandos UNO POR UNO:
+
+    apt update && apt upgrade -y
+
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    apt install -y nodejs git
+
+    cd /opt
+    git clone https://github.com/andycg1201/wsapi.git
+    cd wsapi
+    npm install
+
+    mkdir -p config auth_sessions
+
+    cat > config/sessions.json << 'EOF'
+[
+  { "id": "numero_1", "label": "Número 1", "enabled": true },
+  { "id": "numero_2", "label": "Número 2", "enabled": true }
+]
+EOF
+
+    ufw allow 22
+    ufw allow 3000
+    ufw enable
+    (responder y si pregunta)
+
+    npm install -g pm2
+    pm2 start src/index.js --name wsapi
+    pm2 startup
+    (ejecutar el comando que PM2 muestre)
+    pm2 save
+
+
+=== 5. VINCULAR SESIONES DE WHATSAPP ===
+
+5.1 Abrir en el navegador: http://TU_IP:3000/pair
+5.2 Clic en "Mostrar QR" en UNA sesión
+5.3 Escanear con el celular (WhatsApp → Vincular dispositivo)
+5.4 Esperar "✓ Conectado"
+5.5 Repetir con la siguiente sesión (una a la vez)
+
+
+=== 6. AÑADIR MÁS SESIONES ===
+
+Opción A - Desde el panel:
+   - Clic en el botón + en /pair
+   - El ID se genera automático (ej: numero_1773695055107)
+
+Opción B - Editar config manualmente:
+   ssh root@TU_IP
+   nano /opt/wsapi/config/sessions.json
+   Añadir línea: { "id": "numero_3", "label": "Número 3", "enabled": true }
+   pm2 restart wsapi
+
+
+=== 7. RENOMBRAR SESIÓN (ID más corto) ===
+
+Si añadiste con + y quieres numero_2 en vez de numero_1773695055107:
+
+   ssh root@TU_IP
+   nano /opt/wsapi/config/sessions.json
+   (cambiar "numero_1773695055107" por "numero_2" en ese objeto)
+
+   mv /opt/wsapi/auth_sessions/numero_1773695055107 /opt/wsapi/auth_sessions/numero_2
+
+   pm2 restart wsapi
+
+
+=== 8. URL PARA TRACCAR ===
+
+URL básica:
+   http://TU_IP:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%&priority=10
+
+Por sesión específica:
+   http://TU_IP:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%&session=numero_1&priority=10
+
+Si Traccar usa POST (template sms.http):
+   URL: http://TU_IP:3000/messages/chat
+   Template: to={phone}&body={message}
+   O con sesión: to={phone}&body={message}&session=numero_1
+
+El número de teléfono: código de país + número, sin + ni espacios (ej: 593980263180)
+
+
+=== 9. VER ID Y NÚMERO DE CADA SESIÓN ===
+
+API:
+   http://TU_IP:3000/api/sessions
+
+O por SSH:
+   cat /opt/wsapi/config/sessions.json
+
+
+=== 10. COMANDOS ÚTILES ===
+
+   pm2 status          - Ver estado de WSAPI
+   pm2 logs wsapi      - Ver logs en vivo
+   pm2 restart wsapi   - Reiniciar WSAPI
+
+   ufw status          - Ver firewall
+
+
+=== 11. ACTUALIZAR WSAPI ===
+
+   ssh root@TU_IP
+   cd /opt/wsapi
+   git pull origin main
+   npm install
+   pm2 restart wsapi
+
+
+================================================================================
+  FIN DE LA GUÍA
+================================================================================
