@@ -154,6 +154,7 @@ pm2 logs wsapi
 
 ## Recordatorios (última sesión)
 
+- **Hetzner – SSH key:** Siempre la misma clave que ya usas (Pi, VPS anterior). No crear otra.
 - **Contraseña VPS olvidada:** Hetzner → Rescue → Enable → Console → mount + chroot + passwd root → reboot → Disable Rescue
 - **ID sesión largo (numero_1773695055107):** Se genera con el botón +. Para acortar: editar sessions.json + renombrar auth_sessions/ + pm2 restart
 - **Instalar en nuevo VPS:** Seguir `GUIA_INSTALAR_VPS.txt` (todo en un archivo)
