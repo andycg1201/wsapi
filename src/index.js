@@ -19,6 +19,7 @@ import {
   setSessionFixed,
   loadConfig,
   ensureSessionConnected,
+  reconnectSession,
 } from './baileys-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -111,6 +112,23 @@ const pairHandler = async (request, reply) => {
     button:hover { background: #20bd5a; }
     #qr { margin: 1rem 0; }
     .status { font-weight: bold; display: inline-flex; align-items: center; gap: 0.35rem; }
+    .status-pill {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      padding: 0.25rem 0.65rem; border-radius: 999px;
+      font-size: 0.8rem; font-weight: 600; white-space: nowrap;
+    }
+    .status-pill.online { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+    .status-pill.offline { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+    .status-pill.connecting { background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; }
+    .status-pill.unlinked { background: #fef3c7; color: #b45309; border: 1px solid #fcd34d; }
+    .summary-bar {
+      display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;
+      padding: 0.75rem; background: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb;
+    }
+    .summary-pill { font-size: 0.85rem; padding: 0.2rem 0.6rem; border-radius: 999px; font-weight: 600; }
+    .summary-pill.on { background: #dcfce7; color: #15803d; }
+    .summary-pill.off { background: #fee2e2; color: #b91c1c; }
+    .summary-pill.wait { background: #fef3c7; color: #b45309; }
     .connected { color: #16a34a; }
     .pending { color: #d97706; }
     .icon { font-size: 1.2em; }
@@ -144,13 +162,17 @@ const pairHandler = async (request, reply) => {
   <h1>WSAPI - Vincular números WhatsApp</h1>
   <p>Selecciona un número para mostrar el código QR. Escanéalo con WhatsApp en el celular.</p>
   <div class="legend" style="color:#6b7280;font-size:0.9rem;margin-bottom:1rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
-    <span>✅ Vinculado · ⏳ Sin vincular · Exclusiva/Dinámica (clic para cambiar)</span>
+    <span class="status-pill online">En línea</span>
+    <span class="status-pill offline">Desconectada</span>
+    <span class="status-pill unlinked">Sin vincular</span>
+    <span>· Exclusiva/Dinámica (clic)</span>
     <form id="addForm" style="display:inline;">
       <button type="submit" class="btn-add" title="Agregar sesión">+</button>
     </form>
     <span id="addMsg"></span>
   </div>
-  <h3 style="margin-top:1.5rem;">Sesiones</h3>
+  <div id="summaryBar" class="summary-bar"></div>
+  <h3 style="margin-top:0;">Sesiones</h3>
   <div id="sessions"></div>
   <div id="qr" style="display:none;">
     <h3>Escanear con WhatsApp</h3>
@@ -185,22 +207,45 @@ const pairHandler = async (request, reply) => {
     </div>
   </div>
   <script>
+    var STATUS_LABELS = {
+      online: 'En línea',
+      offline: 'Desconectada',
+      connecting: 'Conectando…',
+      unlinked: 'Sin vincular'
+    };
+    function renderSummary(list) {
+      var counts = { online: 0, offline: 0, connecting: 0, unlinked: 0 };
+      for (var i = 0; i < list.length; i++) {
+        var st = list[i].status || (list[i].connected ? 'online' : 'unlinked');
+        if (counts[st] !== undefined) counts[st]++;
+      }
+      document.getElementById('summaryBar').innerHTML =
+        '<span class="summary-pill on">' + counts.online + ' en línea</span>' +
+        '<span class="summary-pill off">' + counts.offline + ' desconectadas</span>' +
+        (counts.connecting ? '<span class="summary-pill wait">' + counts.connecting + ' conectando</span>' : '') +
+        (counts.unlinked ? '<span class="summary-pill wait">' + counts.unlinked + ' sin vincular</span>' : '');
+    }
     function renderSessions(list) {
+      renderSummary(list);
       var div = document.getElementById('sessions');
       var html = '';
       for (var i = 0; i < list.length; i++) {
         var s = list[i];
-        var cls = s.connected ? 'connected' : 'pending';
-        var icon = s.connected ? '<span class="icon" title="Vinculado">✅</span>' : '<span class="icon" title="Pendiente">⏳</span>';
-        var status = s.connected ? 'Vinculado' : 'Sin vincular';
+        var st = s.status || (s.connected ? 'online' : 'unlinked');
+        var cls = st === 'online' ? 'connected' : 'pending';
+        if (st === 'offline') cls = 'pending';
+        var pill = '<span class="status-pill ' + st + '">' + (STATUS_LABELS[st] || st) + '</span>';
         var fixedToggle = s.fixed
           ? ' <span class="badge badge-click" data-id="' + s.id + '" data-fixed="1" title="Clic para hacer dinámica">Exclusiva</span>'
           : ' <span class="badge badge-click" data-id="' + s.id + '" data-fixed="0" title="Clic para hacer exclusiva">Dinámica</span>';
         var display = s.label || s.id;
         if (s.phone) display += ' <span style="color:#6b7280;font-weight:normal">(' + s.phone + ')</span>';
         else display += ' <span style="color:#9ca3af;font-size:0.85em">(' + s.id + ')</span>';
-        var btns = s.connected ? '<button class="btn-groups" data-id="' + s.id + '">Ver grupos</button>' : '<button data-id="' + s.id + '">Mostrar QR</button>';
-        html += '<div class="session ' + cls + '"><span class="session-content"><span class="status ' + cls + '">' + icon + status + '</span> ' + fixedToggle + ' ' + display + ' ' + btns + '</span><button class="btn-delete" data-id="' + s.id + '" title="Eliminar">🗑</button></div>';
+        var btns = (st === 'online' || st === 'offline')
+          ? '<button class="btn-groups" data-id="' + s.id + '">Ver grupos</button>'
+          : '<button data-id="' + s.id + '">Mostrar QR</button>';
+        if (st === 'offline') btns += ' <button class="btn-reconnect" data-id="' + s.id + '" style="background:#f59e0b;margin-left:0.25rem;">Reconectar</button>';
+        html += '<div class="session ' + cls + '"><span class="session-content">' + pill + ' ' + fixedToggle + ' ' + display + ' ' + btns + '</span><button class="btn-delete" data-id="' + s.id + '" title="Eliminar">🗑</button></div>';
       }
       div.innerHTML = html || '<p>Cargando...</p>';
       div.querySelectorAll('button[data-id]').forEach(function(btn) {
@@ -209,6 +254,18 @@ const pairHandler = async (request, reply) => {
           btn.onclick = function() { showDeleteModal(id); };
         } else if (btn.classList.contains('btn-groups')) {
           btn.onclick = function() { showGroups(id); };
+        } else if (btn.classList.contains('btn-reconnect')) {
+          btn.onclick = function() {
+            btn.disabled = true;
+            btn.textContent = 'Conectando…';
+            fetch('/api/sessions/' + encodeURIComponent(id) + '/reconnect', { method: 'POST' })
+              .then(function(r) { return r.json(); })
+              .then(function(data) {
+                if (data.error) alert(data.error);
+                loadSessions();
+              })
+              .catch(function() { alert('Error al reconectar'); loadSessions(); });
+          };
         } else {
           btn.onclick = function() { showQr(id); };
         }
@@ -396,6 +453,15 @@ fastify.patch('/api/sessions/:id', async (request, reply) => {
     const { fixed } = request.body || {};
     setSessionFixed(request.params.id, fixed === true);
     return reply.send({ success: true, fixed: !!fixed });
+  } catch (err) {
+    return reply.status(400).send({ error: err.message });
+  }
+});
+
+fastify.post('/api/sessions/:id/reconnect', async (request, reply) => {
+  try {
+    reconnectSession(request.params.id);
+    return reply.send({ success: true });
   } catch (err) {
     return reply.status(400).send({ error: err.message });
   }

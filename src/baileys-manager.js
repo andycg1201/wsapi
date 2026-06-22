@@ -228,6 +228,23 @@ export function ensureSessionConnected(sessionId) {
   connectSession(sessionConfig);
 }
 
+/** Reconecta sesión vinculada que quedó desconectada (sin escanear QR) */
+export function reconnectSession(sessionId) {
+  const sessionConfig = config.find((c) => c.id === sessionId);
+  if (!sessionConfig) throw new Error(`Sesión ${sessionId} no existe`);
+  if (!hasExistingAuth(sessionId)) throw new Error('Sesión sin vincular. Usa Mostrar QR.');
+  const entry = sessions.get(sessionId);
+  if (entry?.sock) {
+    stopKeepAlive(entry);
+    try {
+      entry.sock.end?.();
+    } catch (_) {}
+    sessions.delete(sessionId);
+  }
+  console.log(`[${sessionId}] Reconexión manual...`);
+  connectSession(sessionConfig);
+}
+
 /**
  * Obtiene lista de sockets conectados
  * @param {boolean} dynamicOnly - Si true, solo incluye sesiones con fixed !== true
@@ -317,6 +334,12 @@ export async function getQrAsImage(sessionId) {
 export function getSessionsStatus() {
   return config.map((c) => {
     const entry = sessions.get(c.id);
+    const linked = hasExistingAuth(c.id);
+    let status = 'unlinked';
+    if (entry?.connected) status = 'online';
+    else if (entry?.connecting) status = 'connecting';
+    else if (linked) status = 'offline';
+
     return {
       id: c.id,
       label: c.label,
@@ -324,6 +347,7 @@ export function getSessionsStatus() {
       fixed: c.fixed === true,
       connected: entry?.connected ?? false,
       needsQr: !!entry?.qr,
+      status,
     };
   });
 }
