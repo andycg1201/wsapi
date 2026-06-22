@@ -6,186 +6,123 @@
 
 ## ¿Qué es el proyecto?
 
-Sistema de notificaciones WhatsApp **sin UltraMsg** (para ahorrar costo). Usa Baileys con múltiples números de WhatsApp vinculados directamente. Compatible con Traccar.
+Sistema de notificaciones WhatsApp **sin UltraMsg**. Baileys con múltiples números vinculados. Compatible con Traccar. ~2000 mensajes/día repartidos entre ~11 números.
 
 ---
 
 ## Estado actual ✅ FUNCIONANDO
 
-### Dos instancias en producción
+### Producción: 2 VPS Hetzner (Pi ya no se usa)
 
-| Instancia | Ubicación | IP/URL | Uso |
-|-----------|-----------|--------|-----|
-| **Pi** | Raspberry Pi | 192.168.100.6 + ngrok | Sesiones originales, Traccar vía ngrok |
-| **VPS** | Hetzner Nuremberg | 46.225.142.215 | Sesiones nuevas, acceso directo |
+| VPS | IP | Sesiones | Acceso SSH |
+|-----|-----|----------|------------|
+| **wsapi-vps** | 46.225.142.215 | ~5 | Consola Hetzner o contraseña root |
+| **VPS 2** | 46.225.92.152 | ~6 | Clave SSH (`id_ed25519.pub`) |
 
-### Lo que ya funciona
+- **Pi (192.168.100.6):** liberado para otro proyecto. Ya no es producción WSAPI.
+- **ngrok:** ya no se usa para Traccar (solo VPS directo).
 
-- **Notificaciones operativas** - Traccar envía a WSAPI y los mensajes llegan a WhatsApp
-- **Múltiples números** - Sesiones con round-robin o fijas (`session=numero_X`)
-- **Envío a grupos** - Usar ID de grupo: `to=1234567890-9876543210@g.us`
+### Keep-alive sesiones ✅ (marzo 2026)
 
-### Panel `/pair` - Funciones
+**Problema:** sesiones “dormidas” en Dispositivos vinculados (última actividad hace días); clientes veían *“Esperando el mensaje…”*.
 
-| Función | Descripción |
-|---------|-------------|
-| ✅/⏳ | Iconos: Vinculado / Sin vincular |
-| Exclusiva/Dinámica | Badge clicable: alterna entre sesión fija o round-robin |
-| **+** | Botón circular: agregar sesión (ID automático) |
-| Ver grupos | Lista grupos WhatsApp y permite copiar ID |
-| 🗑 | Eliminar sesión (PIN: 1980) |
+**Solución aplicada** (`baileys-manager.js`, commit `5ad5afb`):
+- `markOnlineOnConnect: true`
+- Presencia “disponible” cada 10 min
+- Ping socket cada 30 s
 
-- Al vincular: se muestra número de teléfono y nombre de WhatsApp automáticamente
-- **Exclusiva** = solo se usa con `?session=numero_X`; **Dinámica** = entra en round-robin
+**Desplegado en ambas VPS** — no requirió re-escanear QR.
 
-### URLs Traccar
-
-**Pi (ngrok):**
-```
-https://izaiah-multiaxial-mostly.ngrok-free.dev/messages/chat?to=%NUMBER%&body=%MESSAGE%&priority=10
-```
-
-**VPS (directo):**
-```
-http://46.225.142.215:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%&priority=10
-```
-Por sesión: añadir `&session=numero_1` (o numero_2, etc.)
-
-### Configuración
-
-- **Pi:** systemd (ngrok + wsapi), arranque automático al encender
-- **VPS:** PM2 (wsapi), Hetzner CPX22 Nuremberg
-- **Ver sesiones/IDs:** `http://46.225.142.215:3000/api/sessions`
-
----
-
-## Para continuar
-
-### Si algo deja de funcionar
-
-**Pi:**
+**Actualizar en VPS:**
 ```bash
-ssh andycg@192.168.100.6
-sudo systemctl status ngrok wsapi
-sudo systemctl restart wsapi   # o ngrok
-```
-Panel: `http://192.168.100.6:3000/pair`
-
-**VPS:**
-```bash
-ssh root@46.225.142.215
-pm2 status
-pm2 restart wsapi
-```
-Panel: `http://46.225.142.215:3000/pair`
-
-### Vincular más números
-
-Pi: `https://izaiah-multiaxial-mostly.ngrok-free.dev/pair`  
-VPS: `http://46.225.142.215:3000/pair`  
-Clic en **+** → Mostrar QR → escanear (una sesión a la vez)
-
-### Actualizar código
-
-**Pi:**
-```bash
-ssh andycg@192.168.100.6
-cd /opt/wsapi && git pull origin main && npm install && sudo systemctl restart wsapi
-```
-
-**VPS:**
-```bash
-ssh root@46.225.142.215
 cd /opt/wsapi && git pull origin main && npm install && pm2 restart wsapi
 ```
 
+### URLs Traccar
+
+**VPS 1 (5 sesiones):**
+```
+http://46.225.142.215:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%&priority=10
+```
+
+**VPS 2 (6 sesiones):**
+```
+http://46.225.92.152:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%&priority=10
+```
+
+Por sesión: `&session=numero_1` (ver IDs en `/api/sessions`).
+
+### Panel `/pair`
+
+| VPS | URL |
+|-----|-----|
+| VPS 1 | http://46.225.142.215:3000/pair |
+| VPS 2 | http://46.225.92.152:3000/pair |
+
+Funciones: ✅/⏳, Exclusiva/Dinámica, +, Ver grupos, 🗑 (PIN 1980).
+
 ---
 
-## Comandos útiles
+## Si algo falla
 
+**VPS 1** (consola Hetzner si SSH no entra):
 ```bash
-# PC (desarrollo)
-npm start
-npm run dev
-
-# Pi
-ssh andycg@192.168.100.6
-sudo systemctl status ngrok wsapi
-
-# VPS
-ssh root@46.225.142.215
+cd /opt/wsapi
 pm2 status
+pm2 restart wsapi
 pm2 logs wsapi
+```
+
+**VPS 2:**
+```bash
+ssh root@46.225.92.152
+cd /opt/wsapi && pm2 restart wsapi
 ```
 
 ---
 
-## API relevante
+## Pendiente (para después)
 
-| Método | Ruta | Descripción |
-|--------|------|-------------|
-| GET | `/api/sessions` | Estado de sesiones |
-| POST | `/api/sessions` | Agregar sesión (body vacío = ID auto) |
-| PATCH | `/api/sessions/:id` | Cambiar fijo (body: `{ "fixed": true/false }`) |
-| DELETE | `/api/sessions/:id` | Eliminar sesión (body: `{ "pin": "1980" }`) |
-| GET | `/api/sessions/:id/groups` | Grupos de una sesión conectada |
-
----
-
-## Archivos clave
-
-- `config/sessions.json` - Sesiones (phone, label se auto-actualizan)
-- `auth_sessions/` - Credenciales WhatsApp (no subir a git)
-- `GUIA_INSTALAR_VPS.txt` - **Guía completa** para instalar en nuevo VPS (sin ayuda)
-- `CONFIGURAR_TRACCAR.md` - Guía Traccar (SMS POST)
-- `GUIA_VPS.md` - Comprar VPS e instalar WSAPI
-- `VPS_PARALELA.md` - Pi intacto, VPS para sesiones nuevas
+| Tema | Notas |
+|------|-------|
+| **Lista números con error de envío** | Botón en panel; no incluye “Esperando el mensaje” |
+| **IDs consecutivos (numero_1, 2, 3…)** | Requiere cambio en `POST /api/sessions` |
+| **Proxy Bright Data** | ~11 cuentas, 2 VPS; ver sección Proxy abajo |
+| **SSH VPS 1** | Añadir `id_ed25519.pub` a authorized_keys para entrar sin contraseña |
 
 ---
 
-## VPS Hetzner ✅ FUNCIONANDO
+## Recordatorios
 
-- **IP:** 46.225.142.215
-- **Panel:** http://46.225.142.215:3000/pair
-- **Sesiones:** numero_1, numero_2, etc. (ver `/api/sessions`)
-- **Renombrar sesión:** editar `config/sessions.json` + renombrar carpeta en `auth_sessions/` + `pm2 restart wsapi`
-
----
-
-## Recordatorios (última sesión)
-
-- **Hetzner – SSH key:** Siempre la misma clave que ya usas (Pi, VPS anterior). No crear otra.
-- **Contraseña VPS olvidada:** Hetzner → Rescue → Enable → Console → mount + chroot + passwd root → reboot → Disable Rescue
-- **ID sesión largo (numero_1773695055107):** Se genera con el botón +. Para acortar: editar sessions.json + renombrar auth_sessions/ + pm2 restart
-- **Instalar en nuevo VPS:** Seguir `GUIA_INSTALAR_VPS.txt` (todo en un archivo)
+- **SSH key Hetzner:** misma clave pública → `C:\Users\andre\.ssh\id_ed25519.pub` (no la privada)
+- **Contraseña VPS:** Hetzner → Console o Rescue → `passwd root`
+- **ID sesión largo (`numero_1773695055107`):** renombrar en `sessions.json` + carpeta `auth_sessions/` + `pm2 restart`
+- **Nuevo VPS:** `GUIA_INSTALAR_VPS.txt`
 
 ---
 
 ## Proxy (planificado)
 
-**Contexto:** ~10 cuentas, ~2000 mensajes/día → riesgo de ban. Se planea usar proxy para reducir.
-
-### Proveedor recomendado: **Bright Data**
-- Web: [brightdata.com](https://brightdata.com)
-- SOCKS5 residencial, trial gratis, alta fiabilidad para WhatsApp
-
-### Implementación (cuando digas "apliquemos proxy")
-
-1. **Código:** Añadir soporte proxy opcional en `baileys-manager.js`
-   - `socks-proxy-agent` como dependencia
-   - Config por sesión en `config/sessions.json` (ej. `proxy: "socks5://user:pass@host:port"`)
-   - Por defecto: sin proxy (no afecta lo que ya funciona)
-
-2. **Comportamiento:** Sesión con proxy configurado → reconexión breve usando proxy, **sin** escanear QR de nuevo
-
-3. **Estrategia sugerida:** 2-3 proxies, 3-4 cuentas por proxy (opción B de coste/riesgo equilibrado)
+- **Proveedor:** Bright Data (SOCKS5 residencial)
+- **Cuándo:** “apliquemos proxy” → opcional por sesión en `sessions.json`
+- **Estrategia:** 2–3 proxies, 3–4 cuentas por proxy
 
 ---
 
-## Ubicación del proyecto
+## Archivos clave
+
+- `config/sessions.json` — sesiones (phone, label auto)
+- `auth_sessions/` — credenciales (no subir a git)
+- `GUIA_INSTALAR_VPS.txt` — instalar VPS desde cero
+- `CONFIGURAR_TRACCAR.md` — Traccar SMS POST
+
+---
+
+## Ubicación
 
 | Lugar | Ruta / Acceso |
 |-------|---------------|
-| PC (desarrollo) | `c:\Users\andre\halconsoft\wsapi` |
-| Raspberry Pi | `/opt/wsapi` · `ssh andycg@192.168.100.6` |
-| VPS Hetzner | `/opt/wsapi` · `ssh root@46.225.142.215` |
+| PC desarrollo | `c:\Users\andre\halconsoft\wsapi` |
+| VPS 1 | `/opt/wsapi` · 46.225.142.215 |
+| VPS 2 | `/opt/wsapi` · 46.225.92.152 |
+| Pi (legacy) | `/opt/wsapi` · 192.168.100.6 — no producción |
