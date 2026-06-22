@@ -9,9 +9,31 @@ import path from 'path';
 import QRCode from 'qrcode';
 
 const AUTH_BASE = path.join(process.cwd(), 'auth_sessions');
-let sessions = new Map(); // id -> { sock, connected, qr, label, connecting }
+const PRESENCE_INTERVAL_MS = 10 * 60 * 1000; // latido cada 10 min (evita sesión "dormida")
+let sessions = new Map(); // id -> { sock, connected, qr, label, connecting, keepAliveTimer? }
 let config = [];
 let roundRobinIndex = 0;
+
+function stopKeepAlive(entry) {
+  if (entry?.keepAliveTimer) {
+    clearInterval(entry.keepAliveTimer);
+    entry.keepAliveTimer = null;
+  }
+}
+
+async function pingSession(id, sock) {
+  try {
+    await sock.sendPresenceUpdate('available');
+  } catch (err) {
+    console.warn(`[${id}] Keep-alive:`, err.message);
+  }
+}
+
+function startKeepAlive(id, sock, entry) {
+  stopKeepAlive(entry);
+  pingSession(id, sock);
+  entry.keepAliveTimer = setInterval(() => pingSession(id, sock), PRESENCE_INTERVAL_MS);
+}
 
 /** Verifica si la sesión ya tiene credenciales guardadas */
 function hasExistingAuth(sessionId) {
@@ -89,11 +111,16 @@ async function connectSession(sessionConfig) {
 
   const { state, saveCreds } = await useMultiFileAuthState(authPath);
 
+  const existing = sessions.get(id);
+  if (existing) stopKeepAlive(existing);
+
   // WhatsApp rechaza WEB/Ubuntu; requiere MACOS para vincular (Issue #2364)
   const sock = makeWASocket({
     auth: state,
     browser: ['Mac OS', 'Chrome', '14.4.1'],
     printQRInTerminal: false,
+    markOnlineOnConnect: true,
+    keepAliveIntervalMs: 30000,
   });
 
   sessions.set(id, { sock, connected: false, qr: null, label: label || id, connecting: true });
@@ -113,6 +140,7 @@ async function connectSession(sessionConfig) {
       entry.connected = true;
       entry.qr = null;
       entry.connecting = false;
+      startKeepAlive(id, sock, entry);
       console.log(`✓ [${id}] Conectado`);
       setImmediate(() => {
         const me = state.creds?.me;
@@ -130,6 +158,7 @@ async function connectSession(sessionConfig) {
     if (connection === 'close') {
       entry.connected = false;
       entry.connecting = false;
+      stopKeepAlive(entry);
       const statusCode = (lastDisconnect?.error instanceof Boom)
         ? lastDisconnect.error.output?.statusCode
         : null;
@@ -343,6 +372,7 @@ const DELETE_PIN = '1980';
 export function removeSession(sessionId) {
   const entry = sessions.get(sessionId);
   if (entry?.sock) {
+    stopKeepAlive(entry);
     try {
       entry.sock.end?.();
     } catch (_) {}
