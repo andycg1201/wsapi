@@ -10,15 +10,84 @@ import QRCode from 'qrcode';
 
 const AUTH_BASE = path.join(process.cwd(), 'auth_sessions');
 const PRESENCE_INTERVAL_MS = 10 * 60 * 1000; // latido cada 10 min (evita sesión "dormida")
-let sessions = new Map(); // id -> { sock, connected, qr, label, connecting, keepAliveTimer? }
+const HEALTH_CHECK_MS = 2 * 60 * 1000; // revisa sesiones atascadas cada 2 min
+let sessions = new Map(); // id -> { sock, connected, qr, label, connecting, keepAliveTimer?, reconnectTimer? }
 let config = [];
 let roundRobinIndex = 0;
+let healthCheckStarted = false;
+
+function clearReconnectTimer(entry) {
+  if (entry?.reconnectTimer) {
+    clearTimeout(entry.reconnectTimer);
+    entry.reconnectTimer = null;
+  }
+}
 
 function stopKeepAlive(entry) {
   if (entry?.keepAliveTimer) {
     clearInterval(entry.keepAliveTimer);
     entry.keepAliveTimer = null;
   }
+}
+
+function teardownSession(entry, { endSocket = false } = {}) {
+  if (!entry) return;
+  stopKeepAlive(entry);
+  clearReconnectTimer(entry);
+  if (endSocket && entry.sock) {
+    try {
+      entry.sock.end?.();
+    } catch (_) {}
+  }
+}
+
+function getDisconnectStatus(lastDisconnect) {
+  if (lastDisconnect?.error instanceof Boom) {
+    return lastDisconnect.error.output?.statusCode ?? null;
+  }
+  return null;
+}
+
+function getReconnectDelay(statusCode) {
+  if (statusCode === DisconnectReason.restartRequired) return 2000;
+  if (
+    statusCode === DisconnectReason.timedOut
+    || statusCode === DisconnectReason.connectionClosed
+    || statusCode === DisconnectReason.connectionLost
+  ) {
+    return 5000;
+  }
+  return 15000;
+}
+
+function scheduleReconnect(sessionConfig, entry, delayMs) {
+  if (!entry) return;
+  clearReconnectTimer(entry);
+  const { id } = sessionConfig;
+  console.log(`[${id}] Reconectando en ${Math.round(delayMs / 1000)} s...`);
+  entry.reconnectTimer = setTimeout(() => {
+    entry.reconnectTimer = null;
+    connectSession(sessionConfig);
+  }, delayMs);
+}
+
+function startHealthCheck() {
+  if (healthCheckStarted) return;
+  healthCheckStarted = true;
+  setInterval(() => {
+    for (const sessionConfig of config) {
+      if (!hasExistingAuth(sessionConfig.id)) continue;
+      const entry = sessions.get(sessionConfig.id);
+      if (entry?.connected || entry?.connecting || entry?.reconnectTimer) continue;
+      console.log(`[${sessionConfig.id}] Health check: sesión inactiva, reconectando...`);
+      try {
+        reconnectSession(sessionConfig.id);
+      } catch (err) {
+        console.error(`[${sessionConfig.id}] Health check:`, err.message);
+      }
+    }
+  }, HEALTH_CHECK_MS);
+  console.log(`✓ Health check cada ${HEALTH_CHECK_MS / 60000} min (sesiones atascadas)`);
 }
 
 async function pingSession(id, sock) {
@@ -112,7 +181,7 @@ async function connectSession(sessionConfig) {
   const { state, saveCreds } = await useMultiFileAuthState(authPath);
 
   const existing = sessions.get(id);
-  if (existing) stopKeepAlive(existing);
+  if (existing) teardownSession(existing, { endSocket: true });
 
   // WhatsApp rechaza WEB/Ubuntu; requiere MACOS para vincular (Issue #2364)
   const sock = makeWASocket({
@@ -123,11 +192,20 @@ async function connectSession(sessionConfig) {
     keepAliveIntervalMs: 30000,
   });
 
-  sessions.set(id, { sock, connected: false, qr: null, label: label || id, connecting: true });
+  sessions.set(id, {
+    sock,
+    connected: false,
+    qr: null,
+    label: label || id,
+    connecting: true,
+    reconnectTimer: null,
+  });
 
   sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update;
     const entry = sessions.get(id);
+    if (!entry || entry.sock !== sock) return;
+
+    const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
       entry.qr = qr;
@@ -140,6 +218,7 @@ async function connectSession(sessionConfig) {
       entry.connected = true;
       entry.qr = null;
       entry.connecting = false;
+      clearReconnectTimer(entry);
       startKeepAlive(id, sock, entry);
       console.log(`✓ [${id}] Conectado`);
       setImmediate(() => {
@@ -159,18 +238,25 @@ async function connectSession(sessionConfig) {
       entry.connected = false;
       entry.connecting = false;
       stopKeepAlive(entry);
-      const statusCode = (lastDisconnect?.error instanceof Boom)
-        ? lastDisconnect.error.output?.statusCode
-        : null;
+      const statusCode = getDisconnectStatus(lastDisconnect);
+      const errMsg = lastDisconnect?.error?.message;
 
       if (statusCode === DisconnectReason.loggedOut) {
-        console.log(`[${id}] Sesión cerrada por el usuario`);
+        console.log(`[${id}] Sesión cerrada por el usuario (401)`);
         sessions.delete(id);
         return;
       }
 
-      console.log(`[${id}] Reconectando en 15 segundos...`);
-      setTimeout(() => connectSession(sessionConfig), 15000);
+      if (statusCode === DisconnectReason.connectionReplaced) {
+        console.log(`[${id}] Sesión reemplazada por otra conexión (440)`);
+        sessions.delete(id);
+        return;
+      }
+
+      console.log(
+        `[${id}] Conexión cerrada (código ${statusCode ?? '?'})${errMsg ? `: ${errMsg}` : ''}`
+      );
+      scheduleReconnect(sessionConfig, entry, getReconnectDelay(statusCode));
     }
   });
 
@@ -213,6 +299,7 @@ export async function startAll() {
       console.error(`Error iniciando ${withAuth[i].id}:`, err.message);
     }
   }
+  startHealthCheck();
 }
 
 /**
@@ -221,9 +308,13 @@ export async function startAll() {
  */
 export function ensureSessionConnected(sessionId) {
   const entry = sessions.get(sessionId);
-  if (entry?.sock) return; // ya conectada o intentando
+  if (entry?.connected || entry?.connecting) return;
   const sessionConfig = config.find((c) => c.id === sessionId);
   if (!sessionConfig) return;
+  if (entry?.sock) {
+    reconnectSession(sessionId);
+    return;
+  }
   console.log(`[${sessionId}] Conectando bajo demanda (QR solicitado)...`);
   connectSession(sessionConfig);
 }
@@ -234,11 +325,8 @@ export function reconnectSession(sessionId) {
   if (!sessionConfig) throw new Error(`Sesión ${sessionId} no existe`);
   if (!hasExistingAuth(sessionId)) throw new Error('Sesión sin vincular. Usa Mostrar QR.');
   const entry = sessions.get(sessionId);
-  if (entry?.sock) {
-    stopKeepAlive(entry);
-    try {
-      entry.sock.end?.();
-    } catch (_) {}
+  if (entry) {
+    teardownSession(entry, { endSocket: true });
     sessions.delete(sessionId);
   }
   console.log(`[${sessionId}] Reconexión manual...`);
@@ -395,13 +483,8 @@ const DELETE_PIN = '1980';
  */
 export function removeSession(sessionId) {
   const entry = sessions.get(sessionId);
-  if (entry?.sock) {
-    stopKeepAlive(entry);
-    try {
-      entry.sock.end?.();
-    } catch (_) {}
-    sessions.delete(sessionId);
-  } else {
+  if (entry) {
+    teardownSession(entry, { endSocket: true });
     sessions.delete(sessionId);
   }
   const configPath = path.join(process.cwd(), 'config', 'sessions.json');
