@@ -316,7 +316,7 @@ export async function startAll() {
  */
 export function ensureSessionConnected(sessionId) {
   const entry = sessions.get(sessionId);
-  if (entry?.connected || entry?.connecting) return;
+  if (entry?.connected || entry?.connecting || entry?.qr) return;
   const sessionConfig = config.find((c) => c.id === sessionId);
   if (!sessionConfig) return;
   if (entry?.sock) {
@@ -426,9 +426,24 @@ export function getSessionQr(sessionId) {
  * Genera QR como imagen base64 para mostrar en web
  */
 export async function getQrAsImage(sessionId) {
-  const qr = getSessionQr(sessionId);
+  const qr = await waitForSessionQr(sessionId);
   if (!qr) return null;
   return await QRCode.toDataURL(qr, { width: 300 });
+}
+
+const QR_WAIT_MS = 20000;
+
+/** Espera a que Baileys emita el QR sin reiniciar la conexión en curso */
+async function waitForSessionQr(sessionId, timeoutMs = QR_WAIT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const qr = getSessionQr(sessionId);
+    if (qr) return qr;
+    const entry = sessions.get(sessionId);
+    if (!entry?.connecting && !entry?.sock) break;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return getSessionQr(sessionId);
 }
 
 /**
@@ -487,7 +502,7 @@ export function addSession(id, label = id) {
   fullConfig.push(newSession);
   fs.writeFileSync(configPath, JSON.stringify(fullConfig, null, 2), 'utf-8');
   config = fullConfig.filter((s) => s.enabled !== false);
-  connectSession(newSession);
+  console.log(`[${id}] Sesión añadida — usa "Mostrar QR" para vincular`);
   return newSession;
 }
 

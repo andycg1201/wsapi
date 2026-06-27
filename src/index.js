@@ -391,7 +391,7 @@ const pairHandler = async (request, reply) => {
       qrStatus.textContent = 'Generando código QR...';
       qrStatus.style.display = 'block';
       var attempts = 0;
-      var t = setInterval(function() {
+      function pollQr() {
         attempts++;
         fetch('/api/qr/' + encodeURIComponent(id)).then(function(r) { return r.json(); }).then(function(data) {
           if (data.error) {
@@ -417,14 +417,16 @@ const pairHandler = async (request, reply) => {
                 clearInterval(t);
                 qrDiv.style.display = 'none';
                 loadSessions();
-              } else if (attempts >= 30) {
+              } else if (attempts >= 15) {
                 clearInterval(t);
-                qrStatus.innerHTML = 'No se generó el QR. Reinicia el servidor.';
+                qrStatus.innerHTML = 'No se generó el QR. Pulsa "Mostrar QR" de nuevo.';
               }
             }).catch(function() { clearInterval(t); qrStatus.textContent = 'Servidor no disponible.'; });
           }
         }).catch(function() { clearInterval(t); qrStatus.textContent = 'Servidor no disponible.'; });
-      }, 2000);
+      }
+      pollQr();
+      var t = setInterval(pollQr, 3000);
     }
     loadSessions();
     var refreshId = setInterval(function() {
