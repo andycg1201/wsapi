@@ -376,6 +376,7 @@ const pairHandler = async (request, reply) => {
         }
         msgDiv.innerHTML = '<span class="msg ok">Agregada</span>';
         loadSessions();
+        if (data.session && data.session.id) showQr(data.session.id);
         setTimeout(function() { msgDiv.innerHTML = ''; }, 4000);
       }).catch(function() {
         msgDiv.innerHTML = '<span class="msg err">Error</span>';
@@ -392,7 +393,12 @@ const pairHandler = async (request, reply) => {
       var attempts = 0;
       var t = setInterval(function() {
         attempts++;
-        fetch('/api/qr/' + id).then(function(r) { return r.json(); }).then(function(data) {
+        fetch('/api/qr/' + encodeURIComponent(id)).then(function(r) { return r.json(); }).then(function(data) {
+          if (data.error) {
+            clearInterval(t);
+            qrStatus.innerHTML = escapeHtml(data.error);
+            return;
+          }
           if (data.qr) {
             clearInterval(t);
             qrImg.src = data.qr;
@@ -436,9 +442,13 @@ fastify.get('/pair/', pairHandler);
 // API para el panel
 fastify.get('/api/sessions', async () => ({ sessions: getSessionsStatus() }));
 fastify.get('/api/qr/:id', async (request, reply) => {
-  ensureSessionConnected(request.params.id);
-  const qr = await getQrAsImage(request.params.id);
-  return reply.send({ qr: qr || null });
+  try {
+    ensureSessionConnected(request.params.id);
+    const qr = await getQrAsImage(request.params.id);
+    return reply.send({ qr: qr || null });
+  } catch (err) {
+    return reply.status(400).send({ error: err.message, qr: null });
+  }
 });
 fastify.get('/api/sessions/:id/groups', async (request, reply) => {
   try {

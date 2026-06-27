@@ -256,6 +256,14 @@ async function connectSession(sessionConfig) {
       console.log(
         `[${id}] Conexión cerrada (código ${statusCode ?? '?'})${errMsg ? `: ${errMsg}` : ''}`
       );
+
+      if (!hasExistingAuth(id)) {
+        console.log(`[${id}] Sin vincular — espera "Mostrar QR" para reintentar`);
+        teardownSession(entry, { endSocket: true });
+        sessions.delete(id);
+        return;
+      }
+
       scheduleReconnect(sessionConfig, entry, getReconnectDelay(statusCode));
     }
   });
@@ -312,7 +320,14 @@ export function ensureSessionConnected(sessionId) {
   const sessionConfig = config.find((c) => c.id === sessionId);
   if (!sessionConfig) return;
   if (entry?.sock) {
-    reconnectSession(sessionId);
+    if (hasExistingAuth(sessionId)) {
+      reconnectSession(sessionId);
+    } else {
+      teardownSession(entry, { endSocket: true });
+      sessions.delete(sessionId);
+      console.log(`[${sessionId}] Reiniciando conexión para QR...`);
+      connectSession(sessionConfig);
+    }
     return;
   }
   console.log(`[${sessionId}] Conectando bajo demanda (QR solicitado)...`);
