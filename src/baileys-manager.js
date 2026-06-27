@@ -178,10 +178,22 @@ async function connectSession(sessionConfig) {
     fs.mkdirSync(authPath, { recursive: true });
   }
 
-  const { state, saveCreds } = await useMultiFileAuthState(authPath);
-
   const existing = sessions.get(id);
   if (existing) teardownSession(existing, { endSocket: true });
+
+  sessions.set(id, {
+    sock: null,
+    connected: false,
+    qr: null,
+    label: label || id,
+    connecting: true,
+    reconnectTimer: null,
+  });
+
+  const { state, saveCreds } = await useMultiFileAuthState(authPath);
+
+  const entry = sessions.get(id);
+  if (!entry) return;
 
   // WhatsApp rechaza WEB/Ubuntu; requiere MACOS para vincular (Issue #2364)
   const sock = makeWASocket({
@@ -192,14 +204,8 @@ async function connectSession(sessionConfig) {
     keepAliveIntervalMs: 30000,
   });
 
-  sessions.set(id, {
-    sock,
-    connected: false,
-    qr: null,
-    label: label || id,
-    connecting: true,
-    reconnectTimer: null,
-  });
+  entry.sock = sock;
+  entry.connecting = true;
 
   sock.ev.on('connection.update', async (update) => {
     const entry = sessions.get(id);
@@ -439,9 +445,14 @@ async function waitForSessionQr(sessionId, timeoutMs = QR_WAIT_MS) {
   while (Date.now() < deadline) {
     const qr = getSessionQr(sessionId);
     if (qr) return qr;
+
     const entry = sessions.get(sessionId);
-    if (!entry?.connecting && !entry?.sock) break;
-    await new Promise((r) => setTimeout(r, 400));
+    const pending = config.some((c) => c.id === sessionId);
+    if (entry?.connecting || entry?.sock || entry?.qr || (!entry && pending)) {
+      await new Promise((r) => setTimeout(r, 400));
+      continue;
+    }
+    break;
   }
   return getSessionQr(sessionId);
 }
