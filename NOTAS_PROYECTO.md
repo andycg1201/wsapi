@@ -120,12 +120,23 @@ Sesión roja persistente → **Reconectar** en `/pair` (sin QR).
 
 | Tema | Notas |
 |------|-------|
-| **Actualizar Baileys (6.7.21 → reciente)** | Ataca la raíz de los Bad MAC. **Riesgoso** — hacer en ventana de pruebas, revisar patch MACOS |
+| **Monitorear Bad MAC post-Baileys 7** | Ver si disminuyen en logs tras unos días (`grep -c 'Bad MAC' /root/.pm2/logs/wsapi-error.log`) |
 | **Panel único 2 VPS** | Ver ambos servidores en una vista (SSH ya disponible en ambos) |
 | **IDs consecutivos (numero_1, 2, 3…)** | Cambio en `POST /api/sessions` |
 | **Proxy Bright Data** | ~11 cuentas, 2 VPS |
 
-**Resueltos 14-jul-2026:** VPS 1 actualizado y con `settings.json` (vía `setup-vps.sh`) · SSH directo a ambos VPS · alertas admin activas en los 2.
+**Resueltos 14-jul-2026:** VPS 1 actualizado y con `settings.json` (vía `setup-vps.sh`) · SSH directo a ambos VPS · alertas admin activas en los 2 · **Baileys actualizado a 7.0.0-rc13**.
+
+---
+
+## Baileys 7.0.0-rc13 (`16d9081` — 14-jul-2026)
+
+- Actualizado desde 6.7.21. Motivo: v7 corrige de raíz los **Bad MAC** / "Esperando el mensaje" (migración LID de WhatsApp: locks canónicos PN/LID, retención de sesión PN, grace period de prekeys)
+- **Patch MACOS regenerado**: `patches/baileys+7.0.0-rc13.patch` (mismo cambio, la v7 aún trae Platform.WEB)
+- Probado: arranque local + **ambos VPS sin re-escanear QR** (las 11 sesiones reconectaron con el auth existente) + envío de prueba OK desde cada VPS
+- Usuario creó **snapshot** de los VPS antes de actualizar (14-jul) — restaurar desde Hetzner si algo sale mal
+- Rollback rápido sin snapshot: `git checkout 4c086ae -- package.json package-lock.json patches/` + `npm install` + `pm2 restart wsapi`
+- Nota deploy: si `git pull` falla por `package-lock.json` local → `git checkout -- package-lock.json` primero
 
 ---
 
