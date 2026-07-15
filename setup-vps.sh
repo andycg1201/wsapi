@@ -5,12 +5,8 @@
 
 cd /opt/wsapi
 
-if [ ! -f config/settings.json ]; then
-  cp config/settings.halconsoft.json config/settings.json
-  echo "settings.json creado"
-else
-  echo "settings.json ya existe, no se toca"
-fi
+cp -f config/settings.halconsoft.json config/settings.json
+echo "settings.json instalado"
 
 mkdir -p /root/.ssh
 chmod 700 /root/.ssh
