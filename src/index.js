@@ -201,7 +201,7 @@ const pairHandler = async (request, reply) => {
     <form id="addForm" style="display:inline;">
       <button type="submit" class="btn-add" title="Agregar sesión">+</button>
     </form>
-    <button id="btnFailed" style="background:#dc2626;font-size:0.8rem;padding:0.3rem 0.7rem;">Números con problemas</button>
+    <button id="btnFailed" style="background:#dc2626;font-size:0.8rem;padding:0.3rem 0.7rem;">Problemas</button>
     <span id="addMsg"></span>
   </div>
   <div id="summaryBar" class="summary-bar"></div>
