@@ -6,3 +6,8 @@ node_modules/
 
 # Sesiones WhatsApp (cada número tiene su carpeta)
 auth_sessions/
+
+# Generados en cada VPS (no versionar)
+config/failed_numbers.json
+config/settings.json
+backups/

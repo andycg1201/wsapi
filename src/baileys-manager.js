@@ -7,6 +7,7 @@ import { Boom } from '@hapi/boom';
 import fs from 'fs';
 import path from 'path';
 import QRCode from 'qrcode';
+import { execFile } from 'child_process';
 
 const AUTH_BASE = path.join(process.cwd(), 'auth_sessions');
 const PRESENCE_INTERVAL_MS = 10 * 60 * 1000; // latido cada 10 min (evita sesión "dormida")
@@ -134,6 +135,142 @@ export function clearFailedNumber(phone) {
   clearFailedEntry(phone);
 }
 
+// ---------------------------------------------------------------------------
+// Ajustes opcionales (config/settings.json — se crea a mano en cada VPS):
+// { "adminPhone": "5939XXXXXXXX", "maxEventAgeMin": 15 }
+// ---------------------------------------------------------------------------
+const SETTINGS_PATH = path.join(process.cwd(), 'config', 'settings.json');
+let settings = { adminPhone: null, maxEventAgeMin: 15 };
+
+function loadSettings() {
+  try {
+    if (fs.existsSync(SETTINGS_PATH)) {
+      settings = { ...settings, ...JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8')) };
+      console.log(
+        `✓ Ajustes: umbral antigüedad ${settings.maxEventAgeMin} min` +
+        (settings.adminPhone ? ` · alertas a ${settings.adminPhone}` : ' · sin número admin')
+      );
+    }
+  } catch (err) {
+    console.error('Error cargando settings.json:', err.message);
+  }
+}
+
+export function getSettings() {
+  return settings;
+}
+
+// ---------------------------------------------------------------------------
+// Estadísticas del día (en memoria, se reinician a medianoche o al reiniciar)
+// ---------------------------------------------------------------------------
+let stats = { date: todayStr(), perSession: {}, discardedOld: 0, failedSends: 0 };
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function rolloverStatsIfNeeded() {
+  if (stats.date !== todayStr()) {
+    stats = { date: todayStr(), perSession: {}, discardedOld: 0, failedSends: 0 };
+  }
+}
+
+function bumpSessionStat(sessionId, field) {
+  rolloverStatsIfNeeded();
+  if (!stats.perSession[sessionId]) stats.perSession[sessionId] = { sent: 0, failed: 0 };
+  stats.perSession[sessionId][field] += 1;
+}
+
+export function recordDiscardedOld() {
+  rolloverStatsIfNeeded();
+  stats.discardedOld += 1;
+}
+
+export function getStats() {
+  rolloverStatsIfNeeded();
+  return stats;
+}
+
+// ---------------------------------------------------------------------------
+// Alertas al administrador por WhatsApp (si settings.adminPhone está definido)
+// ---------------------------------------------------------------------------
+const ALERT_AFTER_MS = 10 * 60 * 1000; // avisar si una sesión lleva >10 min caída
+const offlineSince = new Map(); // sessionId -> timestamp primera vez vista offline
+const alertedSessions = new Set(); // sesiones ya avisadas en esta caída
+
+async function sendAdminAlert(text) {
+  if (!settings.adminPhone) return;
+  try {
+    await sendMessage(settings.adminPhone, `⚠️ WSAPI\n\n${text}`);
+  } catch (err) {
+    console.warn('No se pudo enviar alerta al admin:', err.message);
+  }
+}
+
+function checkOfflineAlerts() {
+  if (!settings.adminPhone) return;
+  for (const c of config) {
+    if (!hasExistingAuth(c.id)) continue;
+    const entry = sessions.get(c.id);
+    const isOffline = !entry?.connected && !entry?.connecting;
+
+    if (!isOffline) {
+      if (alertedSessions.has(c.id)) {
+        alertedSessions.delete(c.id);
+        sendAdminAlert(`La sesión ${c.label || c.id} (${c.phone || 's/n'}) se recuperó y está en línea.`);
+      }
+      offlineSince.delete(c.id);
+      continue;
+    }
+
+    if (!offlineSince.has(c.id)) offlineSince.set(c.id, Date.now());
+    const downMs = Date.now() - offlineSince.get(c.id);
+    if (downMs > ALERT_AFTER_MS && !alertedSessions.has(c.id)) {
+      alertedSessions.add(c.id);
+      sendAdminAlert(
+        `La sesión ${c.label || c.id} (${c.phone || 's/n'}) lleva ${Math.round(downMs / 60000)} min desconectada y no se ha podido reconectar. Revisa el panel /pair.`
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Backup diario de auth_sessions (tar.gz en backups/, conserva los últimos 7)
+// ---------------------------------------------------------------------------
+const BACKUP_DIR = path.join(process.cwd(), 'backups');
+const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+function runAuthBackup() {
+  try {
+    if (!fs.existsSync(AUTH_BASE)) return;
+    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    const file = path.join(BACKUP_DIR, `auth_${todayStr()}.tar.gz`);
+    execFile(
+      'tar',
+      ['-czf', file, '-C', process.cwd(), 'auth_sessions', 'config'],
+      (err) => {
+        if (err) {
+          console.warn('Backup auth_sessions falló:', err.message);
+          return;
+        }
+        console.log(`✓ Backup creado: ${path.basename(file)}`);
+        const old = fs.readdirSync(BACKUP_DIR)
+          .filter((f) => f.startsWith('auth_') && f.endsWith('.tar.gz'))
+          .sort()
+          .slice(0, -7);
+        for (const f of old) fs.unlinkSync(path.join(BACKUP_DIR, f));
+      }
+    );
+  } catch (err) {
+    console.warn('Backup auth_sessions falló:', err.message);
+  }
+}
+
+function startDailyBackup() {
+  setTimeout(runAuthBackup, 60 * 1000).unref(); // primer backup 1 min tras arrancar
+  setInterval(runAuthBackup, BACKUP_INTERVAL_MS).unref();
+}
+
 /**
  * Verifica si un número está registrado en WhatsApp (con cache de 24 h).
  * Ante cualquier error de la consulta se asume que sí existe (no bloquear envíos).
@@ -214,6 +351,7 @@ function startHealthCheck() {
   if (healthCheckStarted) return;
   healthCheckStarted = true;
   setInterval(() => {
+    checkOfflineAlerts();
     for (const sessionConfig of config) {
       if (!hasExistingAuth(sessionConfig.id)) continue;
       const entry = sessions.get(sessionConfig.id);
@@ -448,7 +586,9 @@ async function connectSession(sessionConfig) {
  */
 export async function startAll() {
   loadConfig();
+  loadSettings();
   loadFailedNumbers();
+  startDailyBackup();
   const withAuth = config.filter((c) => hasExistingAuth(c.id));
   const withoutAuth = config.filter((c) => !hasExistingAuth(c.id));
   if (withAuth.length) {
@@ -549,9 +689,11 @@ export async function sendMessage(to, body, sessionId = null) {
     try {
       const result = await entry.sock.sendMessage(jid, { text: body });
       cacheSentMessage(result);
+      bumpSessionStat(sessionId, 'sent');
       if (phone) clearFailedEntry(phone);
       return { success: true, sessionId };
     } catch (err) {
+      bumpSessionStat(sessionId, 'failed');
       if (phone) recordFailedNumber(phone, 'send_error', body);
       throw new Error(`Error enviando con ${sessionId}: ${err.message}`);
     }
@@ -578,14 +720,18 @@ export async function sendMessage(to, body, sessionId = null) {
     try {
       const result = await sock.sendMessage(jid, { text: body });
       cacheSentMessage(result);
+      bumpSessionStat(id, 'sent');
       if (phone) clearFailedEntry(phone);
       return { success: true, sessionId: id };
     } catch (err) {
       lastError = err;
+      bumpSessionStat(id, 'failed');
       console.warn(`[${id}] Error enviando, intentando siguiente:`, err.message);
     }
   }
 
+  rolloverStatsIfNeeded();
+  stats.failedSends += 1;
   if (phone) recordFailedNumber(phone, 'send_error', body);
   throw new Error(`No se pudo enviar. Último error: ${lastError?.message || lastError}`);
 }

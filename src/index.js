@@ -22,6 +22,9 @@ import {
   reconnectSession,
   getFailedNumbers,
   clearFailedNumber,
+  getStats,
+  getSettings,
+  recordDiscardedOld,
 } from './baileys-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -32,6 +35,19 @@ await fastify.register(formBody); // Para recibir POST form-urlencoded de Tracca
 
 // Iniciar sesiones Baileys
 await startAll();
+
+/**
+ * Extrae la antigüedad del evento desde la línea "Hora: YYYY-MM-DD HH:mm:ss"
+ * que Traccar incluye en el mensaje (%DT_POS%, hora local Ecuador UTC-5).
+ * Devuelve milisegundos de antigüedad, o null si no hay línea Hora.
+ */
+function getEventAgeMs(body) {
+  const m = /Hora:\s*(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/.exec(body);
+  if (!m) return null;
+  const t = Date.parse(`${m[1]}T${m[2]}-05:00`);
+  if (Number.isNaN(t)) return null;
+  return Date.now() - t;
+}
 
 /**
  * Endpoint compatible con Traccar
@@ -48,6 +64,20 @@ async function handleNotify(request, reply) {
     return reply.status(400).send({
       error: [{ to: to ? 'ok' : 'is required' }, { body: body ? 'ok' : 'is required' }],
     });
+  }
+
+  // Filtro de antigüedad: descarta eventos viejos (backlog tras una caída)
+  // para que los clientes no reciban alertas a destiempo
+  const maxAgeMin = getSettings().maxEventAgeMin ?? 15;
+  const ageMs = getEventAgeMs(body);
+  if (ageMs !== null && ageMs > maxAgeMin * 60 * 1000) {
+    recordDiscardedOld();
+    request.log.warn(
+      { to, ageMin: Math.round(ageMs / 60000), maxAgeMin },
+      'Evento descartado por antigüedad'
+    );
+    // 200 para que Traccar no lo reintente
+    return reply.send({ success: true, discarded: true, reason: `Evento de hace ${Math.round(ageMs / 60000)} min (umbral ${maxAgeMin} min)` });
   }
 
   try {
@@ -227,17 +257,31 @@ const pairHandler = async (request, reply) => {
       connecting: 'Conectando…',
       unlinked: 'Sin vincular'
     };
+    var dayStats = null;
     function renderSummary(list) {
       var counts = { online: 0, offline: 0, connecting: 0, unlinked: 0 };
       for (var i = 0; i < list.length; i++) {
         var st = list[i].status || (list[i].connected ? 'online' : 'unlinked');
         if (counts[st] !== undefined) counts[st]++;
       }
+      var statsHtml = '';
+      if (dayStats) {
+        var totalSent = 0, totalFailed = 0;
+        for (var k in dayStats.perSession) {
+          totalSent += dayStats.perSession[k].sent || 0;
+          totalFailed += dayStats.perSession[k].failed || 0;
+        }
+        statsHtml =
+          '<span class="summary-pill" style="background:#e0e7ff;color:#3730a3;">' + totalSent + ' enviados hoy</span>' +
+          (totalFailed ? '<span class="summary-pill off">' + totalFailed + ' fallidos</span>' : '') +
+          (dayStats.discardedOld ? '<span class="summary-pill wait">' + dayStats.discardedOld + ' descartados (viejos)</span>' : '');
+      }
       document.getElementById('summaryBar').innerHTML =
         '<span class="summary-pill on">' + counts.online + ' en línea</span>' +
         '<span class="summary-pill off">' + counts.offline + ' desconectadas</span>' +
         (counts.connecting ? '<span class="summary-pill wait">' + counts.connecting + ' conectando</span>' : '') +
-        (counts.unlinked ? '<span class="summary-pill wait">' + counts.unlinked + ' sin vincular</span>' : '');
+        (counts.unlinked ? '<span class="summary-pill wait">' + counts.unlinked + ' sin vincular</span>' : '') +
+        statsHtml;
     }
     function renderSessions(list) {
       renderSummary(list);
@@ -255,6 +299,10 @@ const pairHandler = async (request, reply) => {
         var display = s.label || s.id;
         if (s.phone) display += ' <span style="color:#6b7280;font-weight:normal">(' + s.phone + ')</span>';
         else display += ' <span style="color:#9ca3af;font-size:0.85em">(' + s.id + ')</span>';
+        if (dayStats && dayStats.perSession[s.id]) {
+          var ps = dayStats.perSession[s.id];
+          display += ' <span style="font-size:0.78em;color:#4b5563;background:#f3f4f6;border-radius:4px;padding:0.1rem 0.35rem;">' + (ps.sent || 0) + ' hoy' + (ps.failed ? ' · ' + ps.failed + ' err' : '') + '</span>';
+        }
         var btns = (st === 'online' || st === 'offline')
           ? '<button class="btn-groups" data-id="' + s.id + '">Ver grupos</button>'
           : '<button data-id="' + s.id + '">Mostrar QR</button>';
@@ -408,7 +456,11 @@ const pairHandler = async (request, reply) => {
     document.getElementById('btnFailed').onclick = showFailedNumbers;
     var pollErrors = 0;
     function loadSessions() {
-      fetch('/api/sessions').then(function(r) { return r.json(); }).then(function(data) {
+      fetch('/api/stats').then(function(r) { return r.json(); }).then(function(d) {
+        dayStats = d.stats || null;
+      }).catch(function() {}).then(function() {
+        return fetch('/api/sessions');
+      }).then(function(r) { return r.json(); }).then(function(data) {
         pollErrors = 0;
         renderSessions(data.sessions || []);
       }).catch(function() {
@@ -534,6 +586,9 @@ fastify.post('/api/sessions/:id/reconnect', async (request, reply) => {
     return reply.status(400).send({ error: err.message });
   }
 });
+
+// Estadísticas del día (enviados/fallidos por sesión, descartados por antigüedad)
+fastify.get('/api/stats', async () => ({ stats: getStats() }));
 
 // Números a los que no llegan los mensajes (sin WhatsApp o error de envío)
 fastify.get('/api/failed-numbers', async () => ({ numbers: getFailedNumbers() }));
