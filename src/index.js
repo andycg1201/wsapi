@@ -20,6 +20,8 @@ import {
   loadConfig,
   ensureSessionConnected,
   reconnectSession,
+  getFailedNumbers,
+  clearFailedNumber,
 } from './baileys-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -169,6 +171,7 @@ const pairHandler = async (request, reply) => {
     <form id="addForm" style="display:inline;">
       <button type="submit" class="btn-add" title="Agregar sesión">+</button>
     </form>
+    <button id="btnFailed" style="background:#dc2626;font-size:0.8rem;padding:0.3rem 0.7rem;">Números con problemas</button>
     <span id="addMsg"></span>
   </div>
   <div id="summaryBar" class="summary-bar"></div>
@@ -203,6 +206,17 @@ const pairHandler = async (request, reply) => {
       </div>
       <div style="padding:1rem; border-top:1px solid #e5e7eb;">
         <button onclick="document.getElementById('groupsModal').classList.remove('show')">Cerrar</button>
+      </div>
+    </div>
+  </div>
+  <div id="failedModal" class="modal">
+    <div class="modal-inner" style="max-width:560px;">
+      <h3>Números a los que no llegan los mensajes</h3>
+      <div class="modal-body" id="failedList">
+        <p>Cargando...</p>
+      </div>
+      <div style="padding:1rem; border-top:1px solid #e5e7eb;">
+        <button onclick="document.getElementById('failedModal').classList.remove('show')">Cerrar</button>
       </div>
     </div>
   </div>
@@ -350,6 +364,48 @@ const pairHandler = async (request, reply) => {
       });
     }
     function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    var FAILED_REASONS = {
+      no_whatsapp: 'No tiene WhatsApp',
+      send_error: 'Error de envío'
+    };
+    function showFailedNumbers() {
+      var modal = document.getElementById('failedModal');
+      var list = document.getElementById('failedList');
+      modal.classList.add('show');
+      list.innerHTML = '<p>Cargando...</p>';
+      fetch('/api/failed-numbers').then(function(r) { return r.json(); }).then(function(data) {
+        var nums = data.numbers || [];
+        if (nums.length === 0) {
+          list.innerHTML = '<p>No hay números con problemas registrados. Se irán agregando automáticamente cuando un envío falle o el número no tenga WhatsApp.</p>';
+          return;
+        }
+        var html = '<p style="margin:0 0 0.5rem 0;font-size:0.9rem;color:#6b7280;">El mensaje de muestra te ayuda a identificar el cliente para eliminarlo de Traccar. Pulsa Quitar cuando lo hayas depurado.</p>';
+        for (var i = 0; i < nums.length; i++) {
+          var n = nums[i];
+          var reason = FAILED_REASONS[n.reason] || n.reason;
+          var last = n.lastAt ? new Date(n.lastAt).toLocaleString() : '';
+          html += '<div class="group-row" style="flex-direction:column;align-items:stretch;">' +
+            '<div style="display:flex;align-items:center;gap:0.5rem;">' +
+              '<strong style="font-family:monospace;">' + escapeHtml(n.phone) + '</strong>' +
+              '<span class="msg err">' + escapeHtml(reason) + '</span>' +
+              '<span style="font-size:0.8em;color:#6b7280;">' + n.count + ' intento(s) · ' + escapeHtml(last) + '</span>' +
+              '<button class="btn-clear-failed" data-phone="' + escapeHtml(n.phone) + '" style="margin-left:auto;background:#6b7280;padding:0.25rem 0.6rem;font-size:0.8em;">Quitar</button>' +
+            '</div>' +
+            (n.sampleBody ? '<div style="font-size:0.82em;color:#4b5563;background:#f9fafb;border-radius:4px;padding:0.4rem;margin-top:0.35rem;white-space:pre-wrap;">' + escapeHtml(n.sampleBody) + '</div>' : '') +
+          '</div>';
+        }
+        list.innerHTML = html;
+        list.querySelectorAll('.btn-clear-failed').forEach(function(b) {
+          b.onclick = function() {
+            fetch('/api/failed-numbers/' + encodeURIComponent(b.getAttribute('data-phone')), { method: 'DELETE' })
+              .then(function() { showFailedNumbers(); });
+          };
+        });
+      }).catch(function() {
+        list.innerHTML = '<p class="msg err">Error al cargar la lista.</p>';
+      });
+    }
+    document.getElementById('btnFailed').onclick = showFailedNumbers;
     var pollErrors = 0;
     function loadSessions() {
       fetch('/api/sessions').then(function(r) { return r.json(); }).then(function(data) {
@@ -477,6 +533,13 @@ fastify.post('/api/sessions/:id/reconnect', async (request, reply) => {
   } catch (err) {
     return reply.status(400).send({ error: err.message });
   }
+});
+
+// Números a los que no llegan los mensajes (sin WhatsApp o error de envío)
+fastify.get('/api/failed-numbers', async () => ({ numbers: getFailedNumbers() }));
+fastify.delete('/api/failed-numbers/:phone', async (request, reply) => {
+  clearFailedNumber(request.params.phone);
+  return reply.send({ success: true });
 });
 
 fastify.delete('/api/sessions/:id', async (request, reply) => {

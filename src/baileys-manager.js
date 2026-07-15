@@ -58,6 +58,98 @@ function createRetryCounterCache() {
 }
 
 const msgRetryCounterCache = createRetryCounterCache();
+
+// ---------------------------------------------------------------------------
+// Registro de números con problemas (sin WhatsApp o con errores de envío)
+// Persistido en config/failed_numbers.json para revisarlo en el panel /pair
+// ---------------------------------------------------------------------------
+const FAILED_NUMBERS_PATH = path.join(process.cwd(), 'config', 'failed_numbers.json');
+const ONWHATSAPP_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // re-verificar número cada 24 h
+
+let failedNumbers = new Map(); // phone -> { phone, reason, sampleBody, count, firstAt, lastAt }
+const onWhatsAppCache = new Map(); // phone -> { exists, ts }
+let saveFailedTimer = null;
+
+function loadFailedNumbers() {
+  try {
+    if (fs.existsSync(FAILED_NUMBERS_PATH)) {
+      const list = JSON.parse(fs.readFileSync(FAILED_NUMBERS_PATH, 'utf-8'));
+      failedNumbers = new Map(list.map((f) => [f.phone, f]));
+      if (failedNumbers.size) {
+        console.log(`✓ ${failedNumbers.size} número(s) con problemas cargado(s)`);
+      }
+    }
+  } catch (err) {
+    console.error('Error cargando failed_numbers.json:', err.message);
+  }
+}
+
+function saveFailedNumbers() {
+  if (saveFailedTimer) return;
+  saveFailedTimer = setTimeout(() => {
+    saveFailedTimer = null;
+    try {
+      fs.writeFileSync(
+        FAILED_NUMBERS_PATH,
+        JSON.stringify([...failedNumbers.values()], null, 2),
+        'utf-8'
+      );
+    } catch (err) {
+      console.error('Error guardando failed_numbers.json:', err.message);
+    }
+  }, 2000);
+}
+
+function recordFailedNumber(phone, reason, sampleBody) {
+  const now = new Date().toISOString();
+  const existing = failedNumbers.get(phone);
+  if (existing) {
+    existing.count += 1;
+    existing.lastAt = now;
+    existing.reason = reason;
+    if (sampleBody) existing.sampleBody = String(sampleBody).slice(0, 300);
+  } else {
+    failedNumbers.set(phone, {
+      phone,
+      reason,
+      sampleBody: sampleBody ? String(sampleBody).slice(0, 300) : null,
+      count: 1,
+      firstAt: now,
+      lastAt: now,
+    });
+  }
+  saveFailedNumbers();
+}
+
+function clearFailedEntry(phone) {
+  if (failedNumbers.delete(phone)) saveFailedNumbers();
+}
+
+export function getFailedNumbers() {
+  return [...failedNumbers.values()].sort((a, b) => (a.lastAt < b.lastAt ? 1 : -1));
+}
+
+export function clearFailedNumber(phone) {
+  onWhatsAppCache.delete(phone);
+  clearFailedEntry(phone);
+}
+
+/**
+ * Verifica si un número está registrado en WhatsApp (con cache de 24 h).
+ * Ante cualquier error de la consulta se asume que sí existe (no bloquear envíos).
+ */
+async function isOnWhatsApp(sock, phone) {
+  const cached = onWhatsAppCache.get(phone);
+  if (cached && Date.now() - cached.ts < ONWHATSAPP_CACHE_TTL_MS) return cached.exists;
+  try {
+    const results = await sock.onWhatsApp(phone);
+    const exists = !!results?.[0]?.exists;
+    onWhatsAppCache.set(phone, { exists, ts: Date.now() });
+    return exists;
+  } catch (_) {
+    return true;
+  }
+}
 let sessions = new Map(); // id -> { sock, connected, qr, label, connecting, keepAliveTimer?, reconnectTimer? }
 let config = [];
 let roundRobinIndex = 0;
@@ -356,6 +448,7 @@ async function connectSession(sessionConfig) {
  */
 export async function startAll() {
   loadConfig();
+  loadFailedNumbers();
   const withAuth = config.filter((c) => hasExistingAuth(c.id));
   const withoutAuth = config.filter((c) => !hasExistingAuth(c.id));
   if (withAuth.length) {
@@ -441,17 +534,25 @@ function getConnectedSockets(dynamicOnly = false) {
  */
 export async function sendMessage(to, body, sessionId = null) {
   const jid = toJid(to);
+  // Solo se verifica/registra números individuales, no grupos
+  const phone = jid.endsWith('@s.whatsapp.net') ? jid.split('@')[0] : null;
 
   if (sessionId) {
     const entry = sessions.get(sessionId);
     if (!entry || !entry.connected || !entry.sock) {
       throw new Error(`Sesión ${sessionId} no disponible. Verifica que esté conectada en /pair`);
     }
+    if (phone && !(await isOnWhatsApp(entry.sock, phone))) {
+      recordFailedNumber(phone, 'no_whatsapp', body);
+      throw new Error(`El número ${phone} no está registrado en WhatsApp`);
+    }
     try {
       const result = await entry.sock.sendMessage(jid, { text: body });
       cacheSentMessage(result);
+      if (phone) clearFailedEntry(phone);
       return { success: true, sessionId };
     } catch (err) {
+      if (phone) recordFailedNumber(phone, 'send_error', body);
       throw new Error(`Error enviando con ${sessionId}: ${err.message}`);
     }
   }
@@ -459,6 +560,11 @@ export async function sendMessage(to, body, sessionId = null) {
   const connected = getConnectedSockets(true);
   if (connected.length === 0) {
     throw new Error('No hay sesiones dinámicas conectadas. Vincula números en /pair o usa ?session=numero_X para uno fijo');
+  }
+
+  if (phone && !(await isOnWhatsApp(connected[0].sock, phone))) {
+    recordFailedNumber(phone, 'no_whatsapp', body);
+    throw new Error(`El número ${phone} no está registrado en WhatsApp`);
   }
 
   const attempts = connected.length;
@@ -472,6 +578,7 @@ export async function sendMessage(to, body, sessionId = null) {
     try {
       const result = await sock.sendMessage(jid, { text: body });
       cacheSentMessage(result);
+      if (phone) clearFailedEntry(phone);
       return { success: true, sessionId: id };
     } catch (err) {
       lastError = err;
@@ -479,6 +586,7 @@ export async function sendMessage(to, body, sessionId = null) {
     }
   }
 
+  if (phone) recordFailedNumber(phone, 'send_error', body);
   throw new Error(`No se pudo enviar. Último error: ${lastError?.message || lastError}`);
 }
 
