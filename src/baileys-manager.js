@@ -11,6 +11,53 @@ import QRCode from 'qrcode';
 const AUTH_BASE = path.join(process.cwd(), 'auth_sessions');
 const PRESENCE_INTERVAL_MS = 10 * 60 * 1000; // latido cada 10 min (evita sesión "dormida")
 const HEALTH_CHECK_MS = 2 * 60 * 1000; // revisa sesiones atascadas cada 2 min
+const SENT_MSG_TTL_MS = 60 * 60 * 1000; // mensajes enviados en cache 1 h (para reintentos)
+const MAX_MSG_RETRIES = 3; // tras 3 reintentos fallidos el mensaje se descarta
+
+// Cache de mensajes enviados: permite responder los "retry receipts" de WhatsApp
+// cuando el cliente no pudo descifrar (evita el "Esperando el mensaje" permanente)
+const sentMessages = new Map(); // msgId -> { message, ts }
+
+setInterval(() => {
+  const cutoff = Date.now() - SENT_MSG_TTL_MS;
+  for (const [key, val] of sentMessages) {
+    if (val.ts < cutoff) sentMessages.delete(key);
+  }
+}, 10 * 60 * 1000).unref();
+
+/** Cache mínimo con interfaz CacheStore que Baileys usa para contar reintentos */
+function createRetryCounterCache() {
+  const store = new Map(); // key -> { value, ts }
+  const TTL = 60 * 60 * 1000;
+  return {
+    get(key) {
+      const item = store.get(key);
+      if (!item) return undefined;
+      if (Date.now() - item.ts > TTL) {
+        store.delete(key);
+        return undefined;
+      }
+      return item.value;
+    },
+    set(key, value) {
+      store.set(key, { value, ts: Date.now() });
+      if (store.size > 5000) {
+        const cutoff = Date.now() - TTL;
+        for (const [k, v] of store) {
+          if (v.ts < cutoff) store.delete(k);
+        }
+      }
+    },
+    del(key) {
+      store.delete(key);
+    },
+    flushAll() {
+      store.clear();
+    },
+  };
+}
+
+const msgRetryCounterCache = createRetryCounterCache();
 let sessions = new Map(); // id -> { sock, connected, qr, label, connecting, keepAliveTimer?, reconnectTimer? }
 let config = [];
 let roundRobinIndex = 0;
@@ -202,6 +249,20 @@ async function connectSession(sessionConfig) {
     printQRInTerminal: false,
     markOnlineOnConnect: true,
     keepAliveIntervalMs: 30000,
+    // Reintentos cuando el cliente no puede descifrar ("Esperando el mensaje"):
+    // getMessage devuelve el contenido original para reenviarlo; tras
+    // MAX_MSG_RETRIES intentos Baileys lo descarta (no congestiona WhatsApp)
+    msgRetryCounterCache,
+    maxMsgRetryCount: MAX_MSG_RETRIES,
+    getMessage: async (key) => {
+      const cached = sentMessages.get(key?.id);
+      if (cached) {
+        console.log(`[${id}] Retry solicitado para mensaje ${key.id} - reenviando`);
+        return cached.message;
+      }
+      console.log(`[${id}] Retry solicitado para mensaje ${key?.id} - no está en cache, se descarta`);
+      return undefined;
+    },
   });
 
   entry.sock = sock;
@@ -387,7 +448,8 @@ export async function sendMessage(to, body, sessionId = null) {
       throw new Error(`Sesión ${sessionId} no disponible. Verifica que esté conectada en /pair`);
     }
     try {
-      await entry.sock.sendMessage(jid, { text: body });
+      const result = await entry.sock.sendMessage(jid, { text: body });
+      cacheSentMessage(result);
       return { success: true, sessionId };
     } catch (err) {
       throw new Error(`Error enviando con ${sessionId}: ${err.message}`);
@@ -408,7 +470,8 @@ export async function sendMessage(to, body, sessionId = null) {
     roundRobinIndex = (roundRobinIndex + 1) % connected.length;
 
     try {
-      await sock.sendMessage(jid, { text: body });
+      const result = await sock.sendMessage(jid, { text: body });
+      cacheSentMessage(result);
       return { success: true, sessionId: id };
     } catch (err) {
       lastError = err;
@@ -417,6 +480,14 @@ export async function sendMessage(to, body, sessionId = null) {
   }
 
   throw new Error(`No se pudo enviar. Último error: ${lastError?.message || lastError}`);
+}
+
+/** Guarda el mensaje enviado en cache (1 h) para poder responder retry receipts */
+function cacheSentMessage(result) {
+  const msgId = result?.key?.id;
+  if (msgId && result?.message) {
+    sentMessages.set(msgId, { message: result.message, ts: Date.now() });
+  }
 }
 
 /**
