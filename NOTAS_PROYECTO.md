@@ -32,6 +32,9 @@ Sistema de notificaciones WhatsApp **sin UltraMsg**. Baileys con múltiples núm
 | `2f050ad` | Fix QR sesión nueva: no usar `reconnectSession` sin credenciales |
 | `430ab7a` | Fix QR: no reiniciar conexión si el QR ya está listo |
 | `04a30d8` | Fix QR: esperar hasta 20 s mientras Baileys genera el código |
+| `bd21c70` | **Fix "Esperando el mensaje"**: getMessage + retry (máx 3 intentos) |
+| `96c6d25` | **Números con problemas**: botón en panel, onWhatsApp + registro de fallos |
+| `709b6e6` | **Filtro antigüedad + stats + alertas admin + backup + update.sh** |
 
 **Reconexión (`e4bd8ff`):**
 - Reintento 2 s / 5 s / 15 s según código de error WhatsApp
@@ -70,7 +73,13 @@ Por sesión: `&session=numero_1` — IDs en `/api/sessions`
 
 ## Actualizar código en VPS
 
-**Consola Hetzner:** un comando por línea (no pegar `&&`):
+**Con un solo comando** (desde `709b6e6`):
+
+```bash
+bash /opt/wsapi/update.sh
+```
+
+**O manual (consola Hetzner, un comando por línea):**
 
 ```bash
 cd /opt/wsapi
@@ -83,9 +92,6 @@ npm install
 ```
 ```bash
 pm2 restart wsapi
-```
-```bash
-pm2 status
 ```
 
 **VPS 2 desde PC:** `ssh root@46.225.92.152` + mismos comandos.
@@ -114,57 +120,57 @@ Sesión roja persistente → **Reconectar** en `/pair` (sin QR).
 
 | Tema | Notas |
 |------|-------|
-| **Filtro antigüedad de eventos** | Ver sección abajo — **próximo a implementar** |
-| **Lista números con error de envío** | Botón en panel |
+| **VPS 1 desactualizado** | Le faltan TODOS los fixes desde `2f050ad`. Correr `bash /opt/wsapi/update.sh` en consola Hetzner |
+| **Crear `settings.json` en VPS** | Para alertas admin y umbral antigüedad (ver sección abajo) |
+| **Actualizar Baileys (6.7.21 → reciente)** | Ataca la raíz de los Bad MAC. **Riesgoso** — hacer en ventana de pruebas, revisar patch MACOS |
+| **Panel único 2 VPS** | Ver ambos servidores en una vista. Esperar a que VPS 1 esté accesible por SSH |
 | **IDs consecutivos (numero_1, 2, 3…)** | Cambio en `POST /api/sessions` |
 | **Proxy Bright Data** | ~11 cuentas, 2 VPS |
 | **SSH VPS 1** | Añadir `id_ed25519.pub` a authorized_keys — hoy solo consola Hetzner |
-| **VPS 1 sin fix QR** | `git pull` + `pm2 restart wsapi` en consola (VPS 2 ya actualizado) |
 
 ---
 
-## Filtro de notificaciones a destiempo (pendiente — acordado, sin código aún)
+## Funciones nuevas (`bd21c70` → `709b6e6`)
 
-### Problema
+### Fix "Esperando el mensaje" (`bd21c70`)
+- Cache de mensajes enviados (1 h) + `getMessage`: si el cliente no puede descifrar, WhatsApp pide reintento y WSAPI **reenvía automáticamente**
+- Máximo **3 reintentos**, luego se descarta (no congestiona)
+- Log: `Retry solicitado para mensaje X - reenviando`
+- Causa raíz de los "Esperando el mensaje": faltaba `getMessage` + los `Bad MAC` por sesiones Signal corruptas
 
-Si WSAPI o Traccar cae (ej. 18:00–19:00), al volver Traccar reenvía el **backlog** de eventos. Los clientes reciben alertas viejas (ej. geocerca de las 18:15 llegando a las 19:00).
+### Números con problemas (`96c6d25`)
+- Botón rojo **"Números con problemas"** en `/pair`
+- Verifica con `onWhatsApp` (cache 24 h) si el número existe antes de enviar
+- Registra: número, motivo (sin WhatsApp / error envío), **mensaje de muestra** (identifica al cliente por vehículo/placa), intentos, fecha
+- Persistido en `config/failed_numbers.json` · botón **Quitar** al depurar de Traccar
+- Si el número vuelve a funcionar, sale solo de la lista
 
-### Limitación Traccar
+### Filtro de antigüedad ✅ IMPLEMENTADO (`709b6e6`)
+- Formato confirmado con mensajes reales: `Hora: 2026-07-14 18:12:12` (hora Ecuador, UTC-5)
+- Eventos con más de **15 min** → descartados con HTTP 200 (Traccar no reintenta)
+- Umbral configurable en `config/settings.json` → `maxEventAgeMin`
+- Contador "descartados (viejos)" visible en `/pair` · log `Evento descartado por antigüedad`
+- Mensajes sin línea `Hora:` se envían normal
 
-La URL HTTP solo expone **`%NUMBER%`** y **`%MESSAGE%`**. No hay `eventTime` ni timestamp en query string.
+### Estadísticas del día (`709b6e6`)
+- `/api/stats` + pastillas en `/pair`: enviados hoy, fallidos, descartados
+- Contador por sesión junto a cada número ("123 hoy · 2 err")
+- En memoria: se reinician a medianoche o al reiniciar PM2
 
-### Solución acordada
+### Alertas al admin (`709b6e6`)
+- Crear `config/settings.json` en cada VPS (copiar de `settings.example.json`):
 
-1. Incluir en la **plantilla Traccar** la línea `Hora: %DT_POS%` (fecha/hora de la **posición** del evento; no usar `%DT_SER%`).
-2. En WSAPI (`handleNotify` / `src/index.js`): **parsear** esa línea del `body` recibido.
-3. Si el evento tiene más de **15 minutos** de antigüedad → **descartar** el envío + log (y opcional contador en panel).
-
-**Plantilla ejemplo (Traccar):**
-
+```json
+{ "adminPhone": "5939XXXXXXXX", "maxEventAgeMin": 15 }
 ```
-EXCESO VELOCIDAD
-... %NAME%, %PL_NUM%, %SPEED%, %ADDRESS%, %G_MAP%
-Hora: %DT_POS%
-```
 
-**Umbral:** 15 min (configurable vía env si hace falta).
+- Si una sesión vinculada lleva **>10 min caída** sin reconectar → WhatsApp al admin
+- También avisa cuando se recupera · **Sin `settings.json` no hay alertas** (todo lo demás funciona igual)
 
-### Antes de implementar
-
-Pedir **2–3 mensajes reales** ya renderizados por Traccar para fijar:
-- Formato exacto de `%DT_POS%` (fecha, hora, separadores)
-- Zona horaria (Ecuador)
-
-Sin eso el parser puede fallar en casos reales.
-
-### Implementación prevista (cuando digas)
-
-| Paso | Dónde |
-|------|--------|
-| Parser `Hora:` en body | `src/index.js` → `handleNotify` |
-| Umbral 15 min + env opcional | `.env` / config |
-| Log + stats descartados | logs PM2; opcional badge en `/pair` |
-| Documentar plantilla | `CONFIGURAR_TRACCAR.md` |
+### Backup diario (`709b6e6`)
+- `backups/auth_YYYY-MM-DD.tar.gz` (auth_sessions + config), conserva últimos 7
+- Primer backup 1 min después de arrancar
+- Restaurar: `tar -xzf backups/auth_XXXX.tar.gz -C /opt/wsapi` + `pm2 restart wsapi`
 
 ---
 
