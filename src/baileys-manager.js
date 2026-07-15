@@ -235,6 +235,66 @@ function checkOfflineAlerts() {
 }
 
 // ---------------------------------------------------------------------------
+// Chequeo diario de versión de Baileys (badge en /pair + alerta al admin)
+// ---------------------------------------------------------------------------
+const VERSION_CHECK_MS = 24 * 60 * 60 * 1000;
+const VERSION_NOTIFIED_PATH = path.join(process.cwd(), 'config', 'baileys-version-notified.txt');
+let versionInfo = { installed: null, latest: null, updateAvailable: false };
+
+function getInstalledBaileysVersion() {
+  try {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(process.cwd(), 'node_modules', 'baileys', 'package.json'), 'utf-8')
+    );
+    return pkg.version;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function checkBaileysVersion() {
+  try {
+    const installed = getInstalledBaileysVersion();
+    const res = await fetch('https://registry.npmjs.org/-/package/baileys/dist-tags', {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return;
+    const tags = await res.json();
+    const latest = tags.latest || null;
+    versionInfo = {
+      installed,
+      latest,
+      updateAvailable: !!(installed && latest && installed !== latest),
+    };
+    if (!versionInfo.updateAvailable) return;
+
+    console.log(`Baileys ${latest} disponible (instalada ${installed})`);
+    let lastNotified = null;
+    try {
+      lastNotified = fs.readFileSync(VERSION_NOTIFIED_PATH, 'utf-8').trim();
+    } catch (_) {}
+    if (settings.adminPhone && lastNotified !== latest) {
+      await sendAdminAlert(
+        `Hay una nueva versión de Baileys disponible: ${latest} (instalada: ${installed}).\n\nCuando quieras actualizamos como la última vez.`
+      );
+      fs.writeFileSync(VERSION_NOTIFIED_PATH, latest, 'utf-8');
+    }
+  } catch (err) {
+    console.warn('No se pudo verificar versión de Baileys:', err.message);
+  }
+}
+
+export function getVersionInfo() {
+  return versionInfo;
+}
+
+function startVersionCheck() {
+  versionInfo.installed = getInstalledBaileysVersion();
+  setTimeout(checkBaileysVersion, 3 * 60 * 1000).unref(); // 3 min tras arrancar (sesiones ya en línea)
+  setInterval(checkBaileysVersion, VERSION_CHECK_MS).unref();
+}
+
+// ---------------------------------------------------------------------------
 // Backup diario de auth_sessions (tar.gz en backups/, conserva los últimos 7)
 // ---------------------------------------------------------------------------
 const BACKUP_DIR = path.join(process.cwd(), 'backups');
@@ -589,6 +649,7 @@ export async function startAll() {
   loadSettings();
   loadFailedNumbers();
   startDailyBackup();
+  startVersionCheck();
   const withAuth = config.filter((c) => hasExistingAuth(c.id));
   const withoutAuth = config.filter((c) => !hasExistingAuth(c.id));
   if (withAuth.length) {

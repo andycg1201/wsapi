@@ -25,6 +25,7 @@ import {
   getStats,
   getSettings,
   recordDiscardedOld,
+  getVersionInfo,
 } from './baileys-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -258,6 +259,7 @@ const pairHandler = async (request, reply) => {
       unlinked: 'Sin vincular'
     };
     var dayStats = null;
+    var baileysInfo = null;
     function renderSummary(list) {
       var counts = { online: 0, offline: 0, connecting: 0, unlinked: 0 };
       for (var i = 0; i < list.length; i++) {
@@ -265,6 +267,9 @@ const pairHandler = async (request, reply) => {
         if (counts[st] !== undefined) counts[st]++;
       }
       var statsHtml = '';
+      if (baileysInfo && baileysInfo.updateAvailable) {
+        statsHtml += '<span class="summary-pill" style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d;" title="Instalada: ' + baileysInfo.installed + '">Baileys ' + baileysInfo.latest + ' disponible</span>';
+      }
       if (dayStats) {
         var totalSent = 0, totalFailed = 0;
         for (var k in dayStats.perSession) {
@@ -458,6 +463,7 @@ const pairHandler = async (request, reply) => {
     function loadSessions() {
       fetch('/api/stats').then(function(r) { return r.json(); }).then(function(d) {
         dayStats = d.stats || null;
+        baileysInfo = d.baileys || null;
       }).catch(function() {}).then(function() {
         return fetch('/api/sessions');
       }).then(function(r) { return r.json(); }).then(function(data) {
@@ -588,7 +594,7 @@ fastify.post('/api/sessions/:id/reconnect', async (request, reply) => {
 });
 
 // Estadísticas del día (enviados/fallidos por sesión, descartados por antigüedad)
-fastify.get('/api/stats', async () => ({ stats: getStats() }));
+fastify.get('/api/stats', async () => ({ stats: getStats(), baileys: getVersionInfo() }));
 
 // Números a los que no llegan los mensajes (sin WhatsApp o error de envío)
 fastify.get('/api/failed-numbers', async () => ({ numbers: getFailedNumbers() }));

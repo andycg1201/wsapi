@@ -10,4 +10,5 @@ auth_sessions/
 # Generados en cada VPS (no versionar)
 config/failed_numbers.json
 config/settings.json
+config/baileys-version-notified.txt
 backups/
