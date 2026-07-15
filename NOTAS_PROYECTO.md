@@ -120,13 +120,12 @@ Sesión roja persistente → **Reconectar** en `/pair` (sin QR).
 
 | Tema | Notas |
 |------|-------|
-| **VPS 1 desactualizado** | Le faltan TODOS los fixes desde `2f050ad`. Correr `bash /opt/wsapi/update.sh` en consola Hetzner |
-| **Crear `settings.json` en VPS** | Para alertas admin y umbral antigüedad (ver sección abajo) |
 | **Actualizar Baileys (6.7.21 → reciente)** | Ataca la raíz de los Bad MAC. **Riesgoso** — hacer en ventana de pruebas, revisar patch MACOS |
-| **Panel único 2 VPS** | Ver ambos servidores en una vista. Esperar a que VPS 1 esté accesible por SSH |
+| **Panel único 2 VPS** | Ver ambos servidores en una vista (SSH ya disponible en ambos) |
 | **IDs consecutivos (numero_1, 2, 3…)** | Cambio en `POST /api/sessions` |
 | **Proxy Bright Data** | ~11 cuentas, 2 VPS |
-| **SSH VPS 1** | Añadir `id_ed25519.pub` a authorized_keys — hoy solo consola Hetzner |
+
+**Resueltos 14-jul-2026:** VPS 1 actualizado y con `settings.json` (vía `setup-vps.sh`) · SSH directo a ambos VPS · alertas admin activas en los 2.
 
 ---
 
