@@ -1,6 +1,6 @@
 # Notas del proyecto WSAPI - Donde quedamos
 
-**Fecha:** 27 de junio de 2026 (actualizado)
+**Fecha:** 14 de julio de 2026 (actualizado — sesión grande: Baileys 7, alertas, filtro, etc.)
 
 ---
 
@@ -16,8 +16,11 @@ Sistema de notificaciones WhatsApp **sin UltraMsg**. Baileys con múltiples núm
 
 | VPS | IP | Sesiones | Acceso |
 |-----|-----|----------|--------|
-| **wsapi-vps** | 46.225.142.215 | ~5 | Consola Hetzner |
-| **VPS 2** | 46.225.92.152 | ~6 | SSH clave `id_ed25519.pub` |
+| **VPS 1 (wsapi-vps)** | 46.225.142.215 | 5 | **SSH directo** (desde 14-jul, vía `setup-vps.sh`) o consola Hetzner |
+| **VPS 2** | 46.225.92.152 | 6 | SSH clave `id_ed25519.pub` |
+
+- **Ambos VPS al día** con el mismo código, `settings.json` (alertas a 593997652586) y **Baileys 7.0.0-rc13**.
+- **Ojo consola Hetzner:** el teclado cambia caracteres (`{`→`[`, `"`→`'`, `>`→`.`). Preferir SSH o scripts del repo (`setup-vps.sh`).
 
 - **Pi (192.168.100.6):** liberado. No producción.
 - **ngrok:** ya no se usa.
@@ -35,6 +38,9 @@ Sistema de notificaciones WhatsApp **sin UltraMsg**. Baileys con múltiples núm
 | `bd21c70` | **Fix "Esperando el mensaje"**: getMessage + retry (máx 3 intentos) |
 | `96c6d25` | **Números con problemas**: botón en panel, onWhatsApp + registro de fallos |
 | `709b6e6` | **Filtro antigüedad + stats + alertas admin + backup + update.sh** |
+| `be58546`/`2ea1164` | `setup-vps.sh`: instala settings.json + clave SSH (para consola Hetzner) |
+| `16d9081` | **Baileys 6.7.21 → 7.0.0-rc13** (fix raíz de Bad MAC / LID) |
+| `4277ef8` | **Chequeo diario versión Baileys**: badge en /pair + alerta WhatsApp |
 
 **Reconexión (`e4bd8ff`):**
 - Reintento 2 s / 5 s / 15 s según código de error WhatsApp
@@ -49,7 +55,6 @@ Sistema de notificaciones WhatsApp **sin UltraMsg**. Baileys con múltiples núm
 - **No reinicia** la conexión si el QR ya está generado (evita borrarlo en cada poll)
 - Sesión sin vincular que se cae → no reintenta en bucle; espera nuevo clic en **Mostrar QR**
 - Log útil: `[id] QR generado - visible en /pair`
-- **Desplegado en VPS 2** · **VPS 1 pendiente** `git pull` por consola Hetzner
 
 ### Panel `/pair`
 
@@ -60,7 +65,11 @@ Sistema de notificaciones WhatsApp **sin UltraMsg**. Baileys con múltiples núm
 | **Amarillo** | Sin vincular |
 | **Azul** | Conectando… |
 
-- Auto-refresh cada 5 s · Resumen arriba (X en línea · Y desconectadas)
+- Auto-refresh cada 5 s · Resumen arriba: en línea/desconectadas + **enviados hoy / fallidos / descartados**
+- Botón rojo **"Problemas"**: números sin WhatsApp o con error de envío (con mensaje de muestra para identificar el cliente y depurarlo de Traccar)
+- Badge amarillo **"Baileys X disponible"** cuando sale versión nueva
+- Contador por sesión: "123 hoy · 2 err"
+- Badge **Exclusiva/Dinámica** (clic para alternar): dinámica = entra al round-robin; exclusiva = solo envía con `&session=` explícito (para clientes que deben recibir siempre del mismo número)
 - http://46.225.142.215:3000/pair · http://46.225.92.152:3000/pair
 
 ### URLs Traccar
@@ -94,7 +103,9 @@ npm install
 pm2 restart wsapi
 ```
 
-**VPS 2 desde PC:** `ssh root@46.225.92.152` + mismos comandos.
+**Desde PC (ambos):** `ssh root@46.225.92.152` o `ssh root@46.225.142.215` + `bash /opt/wsapi/update.sh`.
+
+**Nota:** si `git pull` falla por `package-lock.json` modificado → `git checkout -- package-lock.json` primero.
 
 ---
 
@@ -120,12 +131,14 @@ Sesión roja persistente → **Reconectar** en `/pair` (sin QR).
 
 | Tema | Notas |
 |------|-------|
-| **Monitorear Bad MAC post-Baileys 7** | Ver si disminuyen en logs tras unos días (`grep -c 'Bad MAC' /root/.pm2/logs/wsapi-error.log`) |
+| **Monitorear Bad MAC post-Baileys 7** | En 3-4 días: `grep -c 'Bad MAC' /root/.pm2/logs/wsapi-error.log` (referencia pre-v7: 656.415 acumulados en VPS 2). Confirmar con clientes que bajen los "Esperando el mensaje" |
+| **Revisar botón "Problemas"** (tarea Andre) | En unos días, depurar de Traccar los números sin WhatsApp que aparezcan |
 | **Panel único 2 VPS** | Ver ambos servidores en una vista (SSH ya disponible en ambos) |
 | **IDs consecutivos (numero_1, 2, 3…)** | Cambio en `POST /api/sessions` |
-| **Proxy Bright Data** | ~11 cuentas, 2 VPS |
+| **Proxy Bright Data** | ~11 cuentas, 2 VPS. Decidir con las stats de un par de semanas |
+| **Baileys 7.0 estable** | Cuando el badge/alerta avise, actualizar igual que el 14-jul (de noche, snapshot antes) |
 
-**Resueltos 14-jul-2026:** VPS 1 actualizado y con `settings.json` (vía `setup-vps.sh`) · SSH directo a ambos VPS · alertas admin activas en los 2 · **Baileys actualizado a 7.0.0-rc13**.
+**Resueltos 14-jul-2026:** fixes QR · fix "Esperando el mensaje" (retry) · botón Problemas · filtro antigüedad · stats · alertas admin · backups diarios · update.sh · setup-vps.sh · SSH a ambos VPS · settings.json en ambos · **Baileys 7.0.0-rc13** · chequeo diario de versión.
 
 ---
 
@@ -181,6 +194,15 @@ Sesión roja persistente → **Reconectar** en `/pair` (sin QR).
 - `backups/auth_YYYY-MM-DD.tar.gz` (auth_sessions + config), conserva últimos 7
 - Primer backup 1 min después de arrancar
 - Restaurar: `tar -xzf backups/auth_XXXX.tar.gz -C /opt/wsapi` + `pm2 restart wsapi`
+
+### Chequeo de versión Baileys (`4277ef8`)
+- Consulta npm 1 vez/día (y 3 min tras arrancar)
+- Versión nueva → badge amarillo en `/pair` + WhatsApp al admin (1 sola vez por versión)
+- `/api/stats` incluye `baileys: { installed, latest, updateAvailable }`
+
+### setup-vps.sh (`be58546`)
+- Para VPS nuevos o consola Hetzner (teclado problemático): `bash setup-vps.sh`
+- Instala `config/settings.json` (desde `settings.halconsoft.json` del repo) + clave SSH del PC + restart
 
 ---
 
