@@ -140,7 +140,7 @@ export function clearFailedNumber(phone) {
 // { "adminPhone": "5939XXXXXXXX", "maxEventAgeMin": 15 }
 // ---------------------------------------------------------------------------
 const SETTINGS_PATH = path.join(process.cwd(), 'config', 'settings.json');
-let settings = { adminPhone: null, maxEventAgeMin: 15 };
+let settings = { adminPhone: null, maxEventAgeMin: 15, auxilioMaxEventAgeMin: 60 };
 
 function loadSettings() {
   try {
@@ -148,6 +148,7 @@ function loadSettings() {
       settings = { ...settings, ...JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8')) };
       console.log(
         `✓ Ajustes: umbral antigüedad ${settings.maxEventAgeMin} min` +
+        ` · AUXILIO ${settings.auxilioMaxEventAgeMin ?? 60} min` +
         (settings.adminPhone ? ` · alertas a ${settings.adminPhone}` : ' · sin número admin')
       );
     }

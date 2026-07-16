@@ -1,4 +1,5 @@
 {
   "adminPhone": "5939XXXXXXXX",
-  "maxEventAgeMin": 15
+  "maxEventAgeMin": 15,
+  "auxilioMaxEventAgeMin": 60
 }

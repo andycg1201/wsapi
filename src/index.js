@@ -67,14 +67,19 @@ async function handleNotify(request, reply) {
     });
   }
 
-  // Filtro de antigüedad: descarta eventos viejos (backlog tras una caída)
-  // para que los clientes no reciban alertas a destiempo
-  const maxAgeMin = getSettings().maxEventAgeMin ?? 15;
+  // Filtro de antigüedad: descarta eventos viejos (backlog tras una caída).
+  // AUXILIO tiene umbral más alto (1 h) porque Traccar a veces lo entrega tarde
+  // y esos mensajes sí deben llegar a los grupos de monitoreo.
+  const settings = getSettings();
+  const isAuxilio = /AUXILIO/i.test(body);
+  const maxAgeMin = isAuxilio
+    ? (settings.auxilioMaxEventAgeMin ?? 60)
+    : (settings.maxEventAgeMin ?? 15);
   const ageMs = getEventAgeMs(body);
   if (ageMs !== null && ageMs > maxAgeMin * 60 * 1000) {
     recordDiscardedOld();
     request.log.warn(
-      { to, ageMin: Math.round(ageMs / 60000), maxAgeMin },
+      { to, ageMin: Math.round(ageMs / 60000), maxAgeMin, isAuxilio },
       'Evento descartado por antigüedad'
     );
     // 200 para que Traccar no lo reintente
