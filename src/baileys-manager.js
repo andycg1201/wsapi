@@ -140,7 +140,7 @@ export function clearFailedNumber(phone) {
 // { "adminPhone": "5939XXXXXXXX", "maxEventAgeMin": 15 }
 // ---------------------------------------------------------------------------
 const SETTINGS_PATH = path.join(process.cwd(), 'config', 'settings.json');
-let settings = { adminPhone: null, maxEventAgeMin: 15, auxilioMaxEventAgeMin: 60 };
+let settings = { adminPhone: null, maxEventAgeMin: 20, auxilioMaxEventAgeMin: 60 };
 
 function loadSettings() {
   try {

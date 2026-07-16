@@ -74,7 +74,7 @@ async function handleNotify(request, reply) {
   const isAuxilio = /AUXILIO/i.test(body);
   const maxAgeMin = isAuxilio
     ? (settings.auxilioMaxEventAgeMin ?? 60)
-    : (settings.maxEventAgeMin ?? 15);
+    : (settings.maxEventAgeMin ?? 20);
   const ageMs = getEventAgeMs(body);
   if (ageMs !== null && ageMs > maxAgeMin * 60 * 1000) {
     recordDiscardedOld();
