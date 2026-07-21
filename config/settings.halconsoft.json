@@ -1,5 +1,7 @@
 {
   "adminPhone": "593997652586",
   "maxEventAgeMin": 20,
-  "auxilioMaxEventAgeMin": 60
+  "auxilioMaxEventAgeMin": 60,
+  "trafficSilenceDayMin": 20,
+  "trafficSilenceNightMin": 40
 }

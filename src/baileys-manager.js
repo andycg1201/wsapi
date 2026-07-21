@@ -6,6 +6,7 @@ import { makeWASocket, useMultiFileAuthState, DisconnectReason } from 'baileys';
 import { Boom } from '@hapi/boom';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import QRCode from 'qrcode';
 import { execFile } from 'child_process';
 
@@ -140,7 +141,13 @@ export function clearFailedNumber(phone) {
 // { "adminPhone": "5939XXXXXXXX", "maxEventAgeMin": 15 }
 // ---------------------------------------------------------------------------
 const SETTINGS_PATH = path.join(process.cwd(), 'config', 'settings.json');
-let settings = { adminPhone: null, maxEventAgeMin: 20, auxilioMaxEventAgeMin: 60 };
+let settings = {
+  adminPhone: null,
+  maxEventAgeMin: 20,
+  auxilioMaxEventAgeMin: 60,
+  trafficSilenceDayMin: 20,
+  trafficSilenceNightMin: 40,
+};
 
 function loadSettings() {
   try {
@@ -149,6 +156,7 @@ function loadSettings() {
       console.log(
         `✓ Ajustes: umbral antigüedad ${settings.maxEventAgeMin} min` +
         ` · AUXILIO ${settings.auxilioMaxEventAgeMin ?? 60} min` +
+        ` · silencio ${settings.trafficSilenceDayMin ?? 20}/${settings.trafficSilenceNightMin ?? 40} min` +
         (settings.adminPhone ? ` · alertas a ${settings.adminPhone}` : ' · sin número admin')
       );
     }
@@ -239,6 +247,74 @@ function checkOfflineAlerts() {
       );
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Silencio de tráfico (posible caída de Traccar) — por VPS, hora Ecuador
+// Día 07:00–22:00 → 20 min · Noche 22:00–07:00 → 40 min
+// ---------------------------------------------------------------------------
+let lastSuccessfulSendAt = Date.now(); // gracia tras arranque = umbral de la franja
+let trafficSilenceAlerted = false;
+
+function isAdminDestination(to) {
+  if (!settings.adminPhone || to == null) return false;
+  const a = String(settings.adminPhone).replace(/\D/g, '');
+  const b = String(to).replace(/\D/g, '');
+  return a.length > 0 && (b === a || b.endsWith(a) || a.endsWith(b));
+}
+
+function getEcuadorHour() {
+  const hour = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Guayaquil',
+    hour: 'numeric',
+    hour12: false,
+  }).format(new Date());
+  // En algunos entornos medianoche sale "24"
+  const h = parseInt(hour, 10);
+  return h === 24 ? 0 : h;
+}
+
+function getTrafficSilenceThresholdMs() {
+  const hour = getEcuadorHour();
+  const isDay = hour >= 7 && hour < 22;
+  const min = isDay
+    ? (settings.trafficSilenceDayMin ?? 20)
+    : (settings.trafficSilenceNightMin ?? 40);
+  return { isDay, thresholdMs: min * 60 * 1000, thresholdMin: min };
+}
+
+/** Marca un envío real (no alertas al admin) y avisa recuperación si había silencio */
+function noteSuccessfulSend(to) {
+  if (isAdminDestination(to)) return;
+  lastSuccessfulSendAt = Date.now();
+  if (trafficSilenceAlerted) {
+    trafficSilenceAlerted = false;
+    const host = os.hostname();
+    sendAdminAlert(
+      `Tráfico recuperado en ${host}.\nYa hay mensajes saliendo de nuevo (Traccar / notificaciones OK).`
+    );
+  }
+}
+
+function checkTrafficSilence() {
+  if (!settings.adminPhone) return;
+  // Solo tiene sentido si hay al menos una sesión vinculada en línea
+  const anyOnline = [...sessions.values()].some((e) => e.connected);
+  if (!anyOnline) return;
+
+  const { isDay, thresholdMs, thresholdMin } = getTrafficSilenceThresholdMs();
+  const silentMs = Date.now() - lastSuccessfulSendAt;
+  if (silentMs < thresholdMs) return;
+  if (trafficSilenceAlerted) return;
+
+  trafficSilenceAlerted = true;
+  const host = os.hostname();
+  const silentMin = Math.round(silentMs / 60000);
+  const franja = isDay ? 'día (07–22)' : 'noche (22–07)';
+  sendAdminAlert(
+    `Sin envíos en ${host} desde hace ${silentMin} min (umbral ${thresholdMin} min · ${franja}).\n` +
+    `Las sesiones WhatsApp pueden estar en línea, pero no llega tráfico — revisa si Traccar está caído o no está notificando a este VPS.`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -419,6 +495,7 @@ function startHealthCheck() {
   healthCheckStarted = true;
   setInterval(() => {
     checkOfflineAlerts();
+    checkTrafficSilence();
     for (const sessionConfig of config) {
       if (!hasExistingAuth(sessionConfig.id)) continue;
       const entry = sessions.get(sessionConfig.id);
@@ -758,6 +835,7 @@ export async function sendMessage(to, body, sessionId = null) {
       const result = await entry.sock.sendMessage(jid, { text: body });
       cacheSentMessage(result);
       bumpSessionStat(sessionId, 'sent');
+      noteSuccessfulSend(to);
       if (phone) clearFailedEntry(phone);
       return { success: true, sessionId };
     } catch (err) {
@@ -789,6 +867,7 @@ export async function sendMessage(to, body, sessionId = null) {
       const result = await sock.sendMessage(jid, { text: body });
       cacheSentMessage(result);
       bumpSessionStat(id, 'sent');
+      noteSuccessfulSend(to);
       if (phone) clearFailedEntry(phone);
       return { success: true, sessionId: id };
     } catch (err) {
