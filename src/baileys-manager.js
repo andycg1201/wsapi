@@ -166,8 +166,14 @@ export function getSettings() {
 // ---------------------------------------------------------------------------
 let stats = { date: todayStr(), perSession: {}, discardedOld: 0, failedSends: 0 };
 
+/** Fecha del día en hora Ecuador (UTC-5), no UTC del servidor */
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Guayaquil',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
 }
 
 function rolloverStatsIfNeeded() {
