@@ -277,12 +277,29 @@ const lastEventSentAt = new Map(); // key -> timestamp último enviado
 const burstAlertedUntil = new Map(); // key -> timestamp hasta el cual no reavisar
 
 function detectEventType(body) {
-  const head = String(body).slice(0, 80).toUpperCase();
-  if (/AUXILIO/.test(head) || /AUXILIO/.test(body)) return 'AUXILIO';
+  const text = String(body);
+  const head = text.slice(0, 120).toUpperCase();
+  const firstLine = (text.split('\n')[0] || '').trim().toUpperCase();
+
+  if (/AUXILIO/.test(head) || /AUXILIO/.test(text)) return 'AUXILIO';
+  // Encendido / Apagado — sin throttle (igual que SOS)
+  if (
+    firstLine === 'ON' || firstLine === 'ENCENDIDO' || firstLine.startsWith('ENCENDIDO')
+    || /ENCENDIDO|IGNITION\s*ON|MOTOR\s*ON/.test(head)
+  ) return 'ENCENDIDO';
+  if (
+    firstLine === 'OFF' || firstLine === 'APAGADO' || firstLine.startsWith('APAGADO')
+    || /APAGADO|IGNITION\s*OFF|MOTOR\s*OFF/.test(head)
+  ) return 'APAGADO';
   if (/EXCESO/.test(head)) return 'EXCESO';
   if (/INGRESO/.test(head)) return 'INGRESO';
   if (/SALIDA/.test(head)) return 'SALIDA';
   return 'OTRO';
+}
+
+/** Tipos que nunca se frenan (solo aviso de ráfaga al admin) */
+function isNoThrottleEvent(eventType) {
+  return eventType === 'AUXILIO' || eventType === 'ENCENDIDO' || eventType === 'APAGADO';
 }
 
 function detectVehicleKey(body) {
@@ -343,16 +360,16 @@ export function evaluateEventThrottle(to, body) {
         `Ráfaga de notificaciones en ${os.hostname()}.\n` +
         `Tipo: ${eventType} · Destino: ${to} · Unidad/placa: ${vehicle}\n` +
         `${hits.length} en el último minuto` +
-        (eventType === 'AUXILIO'
-          ? ' (AUXILIO: se siguen enviando todas).'
+        (isNoThrottleEvent(eventType)
+          ? ` (${eventType}: se siguen enviando todas).`
           : ` — se limitará a 1 cada ${throttleMin} min.`) +
         `\nMuestra: ${sample}`
       );
     }
   }
 
-  // AUXILIO: nunca frenar
-  if (eventType === 'AUXILIO') {
+  // AUXILIO / ENCENDIDO / APAGADO: nunca frenar
+  if (isNoThrottleEvent(eventType)) {
     lastEventSentAt.set(key, now);
     return { allow: true, eventType };
   }

@@ -106,7 +106,7 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 - Clave: destino + tipo (EXCESO/INGRESO/SALIDA/…) + placa/unidad
 - Máx **1 envío cada 3 min** del mismo evento
 - ≥3 en 1 min → WhatsApp al admin (máx 1 aviso/10 min por clave)
-- **AUXILIO:** se envían todas; solo alerta de ráfaga
+- **Sin freno** (se envían todas): **AUXILIO/SOS**, **ENCENDIDO/ON**, **APAGADO/OFF** — solo alerta de ráfaga
 
 ### Silencio de tráfico / Traccar caído (`74a971d` + franjas 22-jul)
 - Por VPS: si no hay ningún envío real (hora Ecuador)

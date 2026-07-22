@@ -91,7 +91,7 @@ async function handleNotify(request, reply) {
   }
 
   // Anti-ráfaga: máx 1 cada 3 min del mismo evento (destino+tipo+placa).
-  // AUXILIO no se frena; solo avisa al admin si llega muy seguido.
+  // AUXILIO / ENCENDIDO / APAGADO no se frenan; solo avisan al admin si llegan en ráfaga.
   const throttle = evaluateEventThrottle(to, body);
   if (!throttle.allow) {
     recordThrottled(to, body, throttle.reason);
