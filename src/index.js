@@ -25,6 +25,8 @@ import {
   getStats,
   getSettings,
   recordDiscardedOld,
+  recordThrottled,
+  evaluateEventThrottle,
   getVersionInfo,
 } from './baileys-manager.js';
 
@@ -84,6 +86,18 @@ async function handleNotify(request, reply) {
     );
     // 200 para que Traccar no lo reintente
     return reply.send({ success: true, discarded: true, reason: `Evento de hace ${Math.round(ageMs / 60000)} min (umbral ${maxAgeMin} min)` });
+  }
+
+  // Anti-ráfaga: máx 1 cada 3 min del mismo evento (destino+tipo+placa).
+  // AUXILIO no se frena; solo avisa al admin si llega muy seguido.
+  const throttle = evaluateEventThrottle(to, body);
+  if (!throttle.allow) {
+    recordThrottled();
+    request.log.warn(
+      { to, eventType: throttle.eventType, reason: throttle.reason },
+      'Evento descartado por throttle (ráfaga)'
+    );
+    return reply.send({ success: true, discarded: true, throttled: true, reason: throttle.reason });
   }
 
   try {
@@ -284,7 +298,8 @@ const pairHandler = async (request, reply) => {
         statsHtml =
           '<span class="summary-pill" style="background:#e0e7ff;color:#3730a3;">' + totalSent + ' enviados hoy</span>' +
           (totalFailed ? '<span class="summary-pill off">' + totalFailed + ' fallidos</span>' : '') +
-          (dayStats.discardedOld ? '<span class="summary-pill wait">' + dayStats.discardedOld + ' descartados (viejos)</span>' : '');
+          (dayStats.discardedOld ? '<span class="summary-pill wait">' + dayStats.discardedOld + ' descartados (viejos)</span>' : '') +
+          (dayStats.throttled ? '<span class="summary-pill wait">' + dayStats.throttled + ' limitados (ráfaga)</span>' : '');
       }
       document.getElementById('summaryBar').innerHTML =
         '<span class="summary-pill on">' + counts.online + ' en línea</span>' +

@@ -147,6 +147,9 @@ let settings = {
   auxilioMaxEventAgeMin: 60,
   trafficSilenceDayMin: 20,
   trafficSilenceNightMin: 40,
+  eventThrottleMin: 3,       // máx 1 envío cada N min (mismo destino+tipo+placa)
+  eventBurstCount: 3,        // ≥N en la ventana = ráfaga
+  eventBurstWindowSec: 60,   // ventana para detectar ráfaga
 };
 
 function loadSettings() {
@@ -157,6 +160,7 @@ function loadSettings() {
         `✓ Ajustes: umbral antigüedad ${settings.maxEventAgeMin} min` +
         ` · AUXILIO ${settings.auxilioMaxEventAgeMin ?? 60} min` +
         ` · silencio ${settings.trafficSilenceDayMin ?? 20}/${settings.trafficSilenceNightMin ?? 40} min` +
+        ` · throttle ${settings.eventThrottleMin ?? 3} min` +
         (settings.adminPhone ? ` · alertas a ${settings.adminPhone}` : ' · sin número admin')
       );
     }
@@ -172,7 +176,7 @@ export function getSettings() {
 // ---------------------------------------------------------------------------
 // Estadísticas del día (en memoria, se reinician a medianoche o al reiniciar)
 // ---------------------------------------------------------------------------
-let stats = { date: todayStr(), perSession: {}, discardedOld: 0, failedSends: 0 };
+let stats = { date: todayStr(), perSession: {}, discardedOld: 0, failedSends: 0, throttled: 0 };
 
 /** Fecha del día en hora Ecuador (UTC-5), no UTC del servidor */
 function todayStr() {
@@ -186,7 +190,7 @@ function todayStr() {
 
 function rolloverStatsIfNeeded() {
   if (stats.date !== todayStr()) {
-    stats = { date: todayStr(), perSession: {}, discardedOld: 0, failedSends: 0 };
+    stats = { date: todayStr(), perSession: {}, discardedOld: 0, failedSends: 0, throttled: 0 };
   }
 }
 
@@ -201,9 +205,119 @@ export function recordDiscardedOld() {
   stats.discardedOld += 1;
 }
 
+export function recordThrottled() {
+  rolloverStatsIfNeeded();
+  stats.throttled += 1;
+}
+
 export function getStats() {
   rolloverStatsIfNeeded();
   return stats;
+}
+
+// ---------------------------------------------------------------------------
+// Anti-ráfaga: máx 1 envío cada N min del mismo evento (destino+tipo+placa).
+// AUXILIO nunca se frena; solo avisa al admin si llega en ráfaga.
+// ---------------------------------------------------------------------------
+const recentEventHits = new Map(); // key -> number[] timestamps
+const lastEventSentAt = new Map(); // key -> timestamp último enviado
+const burstAlertedUntil = new Map(); // key -> timestamp hasta el cual no reavisar
+
+function detectEventType(body) {
+  const head = String(body).slice(0, 80).toUpperCase();
+  if (/AUXILIO/.test(head) || /AUXILIO/.test(body)) return 'AUXILIO';
+  if (/EXCESO/.test(head)) return 'EXCESO';
+  if (/INGRESO/.test(head)) return 'INGRESO';
+  if (/SALIDA/.test(head)) return 'SALIDA';
+  return 'OTRO';
+}
+
+function detectVehicleKey(body) {
+  const text = String(body);
+  const placa = /Placa[:\s]*([A-Z0-9\-]+)/i.exec(text);
+  if (placa?.[1] && placa[1].length >= 3) return placa[1].toUpperCase();
+  const unidad = /Unidad[:\s]*([A-Z0-9\-]+)/i.exec(text);
+  if (unidad?.[1] && unidad[1].length >= 2) return unidad[1].toUpperCase();
+  const veh = /veh[ií]culo\s+([A-Z0-9][A-Z0-9\s\-]{1,20}?)(?:\s+Placa|\s*,|\n)/i.exec(text);
+  if (veh?.[1]) return veh[1].trim().toUpperCase().replace(/\s+/g, ' ');
+  return 's/n';
+}
+
+function eventThrottleKey(to, body) {
+  return `${String(to).trim()}|${detectEventType(body)}|${detectVehicleKey(body)}`;
+}
+
+function pruneThrottleMaps() {
+  const cutoff = Date.now() - 30 * 60 * 1000;
+  for (const [k, ts] of lastEventSentAt) {
+    if (ts < cutoff) lastEventSentAt.delete(k);
+  }
+  for (const [k, until] of burstAlertedUntil) {
+    if (until < Date.now()) burstAlertedUntil.delete(k);
+  }
+  for (const [k, hits] of recentEventHits) {
+    const fresh = hits.filter((t) => t > cutoff);
+    if (fresh.length) recentEventHits.set(k, fresh);
+    else recentEventHits.delete(k);
+  }
+}
+
+/**
+ * Evalúa ráfaga y throttle.
+ * @returns {{ allow: boolean, throttled?: boolean, reason?: string, eventType?: string }}
+ */
+export function evaluateEventThrottle(to, body) {
+  const eventType = detectEventType(body);
+  const vehicle = detectVehicleKey(body);
+  const key = eventThrottleKey(to, body);
+  const now = Date.now();
+  const throttleMin = settings.eventThrottleMin ?? 3;
+  const burstCount = settings.eventBurstCount ?? 3;
+  const burstWindowMs = (settings.eventBurstWindowSec ?? 60) * 1000;
+
+  if (Math.random() < 0.02) pruneThrottleMaps();
+
+  const hits = (recentEventHits.get(key) || []).filter((t) => now - t < burstWindowMs);
+  hits.push(now);
+  recentEventHits.set(key, hits);
+
+  if (hits.length >= burstCount) {
+    const until = burstAlertedUntil.get(key) || 0;
+    if (now >= until) {
+      burstAlertedUntil.set(key, now + 10 * 60 * 1000); // no reavisar 10 min
+      const sample = String(body).slice(0, 180).replace(/\s+/g, ' ');
+      sendAdminAlert(
+        `Ráfaga de notificaciones en ${os.hostname()}.\n` +
+        `Tipo: ${eventType} · Destino: ${to} · Unidad/placa: ${vehicle}\n` +
+        `${hits.length} en el último minuto` +
+        (eventType === 'AUXILIO'
+          ? ' (AUXILIO: se siguen enviando todas).'
+          : ` — se limitará a 1 cada ${throttleMin} min.`) +
+        `\nMuestra: ${sample}`
+      );
+    }
+  }
+
+  // AUXILIO: nunca frenar
+  if (eventType === 'AUXILIO') {
+    lastEventSentAt.set(key, now);
+    return { allow: true, eventType };
+  }
+
+  const lastSent = lastEventSentAt.get(key) || 0;
+  const throttleMs = throttleMin * 60 * 1000;
+  if (lastSent && now - lastSent < throttleMs) {
+    const waitMin = Math.ceil((throttleMs - (now - lastSent)) / 60000);
+    return {
+      allow: false,
+      throttled: true,
+      eventType,
+      reason: `Mismo ${eventType} (${vehicle}) hace menos de ${throttleMin} min — reintentar en ~${waitMin} min`,
+    };
+  }
+
+  lastEventSentAt.set(key, now);
+  return { allow: true, eventType };
 }
 
 // ---------------------------------------------------------------------------

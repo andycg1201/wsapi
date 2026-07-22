@@ -3,5 +3,8 @@
   "maxEventAgeMin": 20,
   "auxilioMaxEventAgeMin": 60,
   "trafficSilenceDayMin": 20,
-  "trafficSilenceNightMin": 40
+  "trafficSilenceNightMin": 40,
+  "eventThrottleMin": 3,
+  "eventBurstCount": 3,
+  "eventBurstWindowSec": 60
 }
