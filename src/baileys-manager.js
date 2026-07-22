@@ -178,6 +178,43 @@ export function getSettings() {
 // ---------------------------------------------------------------------------
 let stats = { date: todayStr(), perSession: {}, discardedOld: 0, failedSends: 0, throttled: 0 };
 
+// Historial ligero en memoria para el panel (clic en pastillas)
+const HISTORY_MAX = 300;
+const HISTORY_TTL_MS = 12 * 60 * 60 * 1000; // 12 h
+const HISTORY_SAMPLE_LEN = 220;
+let messageHistory = []; // { id, ts, kind, to, eventType, sample, reason?, sessionId? }
+
+function pruneMessageHistory() {
+  const cutoff = Date.now() - HISTORY_TTL_MS;
+  messageHistory = messageHistory.filter((e) => e.ts >= cutoff);
+  if (messageHistory.length > HISTORY_MAX) {
+    messageHistory = messageHistory.slice(messageHistory.length - HISTORY_MAX);
+  }
+}
+
+function pushMessageHistory(entry) {
+  messageHistory.push({
+    id: `${Date.now()}-${messageHistory.length}`,
+    ts: Date.now(),
+    kind: entry.kind,
+    to: entry.to ? String(entry.to).slice(0, 80) : null,
+    eventType: entry.eventType || null,
+    sample: entry.sample ? String(entry.sample).slice(0, HISTORY_SAMPLE_LEN) : null,
+    reason: entry.reason ? String(entry.reason).slice(0, 160) : null,
+    sessionId: entry.sessionId || null,
+  });
+  if (messageHistory.length > HISTORY_MAX || Math.random() < 0.05) pruneMessageHistory();
+}
+
+export function getMessageHistory(kind = null) {
+  pruneMessageHistory();
+  const list = kind && kind !== 'all'
+    ? messageHistory.filter((e) => e.kind === kind)
+    : messageHistory;
+  // más recientes primero
+  return [...list].reverse();
+}
+
 /** Fecha del día en hora Ecuador (UTC-5), no UTC del servidor */
 function todayStr() {
   return new Intl.DateTimeFormat('en-CA', {
@@ -191,6 +228,7 @@ function todayStr() {
 function rolloverStatsIfNeeded() {
   if (stats.date !== todayStr()) {
     stats = { date: todayStr(), perSession: {}, discardedOld: 0, failedSends: 0, throttled: 0 };
+    // El historial se limpia por TTL (12 h), no al cambiar de día
   }
 }
 
@@ -200,14 +238,28 @@ function bumpSessionStat(sessionId, field) {
   stats.perSession[sessionId][field] += 1;
 }
 
-export function recordDiscardedOld() {
+export function recordDiscardedOld(to, body, reason) {
   rolloverStatsIfNeeded();
   stats.discardedOld += 1;
+  pushMessageHistory({
+    kind: 'discarded_old',
+    to,
+    eventType: body ? detectEventType(body) : null,
+    sample: body,
+    reason: reason || 'Antigüedad',
+  });
 }
 
-export function recordThrottled() {
+export function recordThrottled(to, body, reason) {
   rolloverStatsIfNeeded();
   stats.throttled += 1;
+  pushMessageHistory({
+    kind: 'throttled',
+    to,
+    eventType: body ? detectEventType(body) : null,
+    sample: body,
+    reason: reason || 'Ráfaga',
+  });
 }
 
 export function getStats() {
@@ -610,6 +662,7 @@ function startHealthCheck() {
   setInterval(() => {
     checkOfflineAlerts();
     checkTrafficSilence();
+    pruneMessageHistory();
     for (const sessionConfig of config) {
       if (!hasExistingAuth(sessionConfig.id)) continue;
       const entry = sessions.get(sessionConfig.id);
@@ -950,10 +1003,25 @@ export async function sendMessage(to, body, sessionId = null) {
       cacheSentMessage(result);
       bumpSessionStat(sessionId, 'sent');
       noteSuccessfulSend(to);
+      pushMessageHistory({
+        kind: 'sent',
+        to,
+        sample: body,
+        eventType: detectEventType(body),
+        sessionId,
+      });
       if (phone) clearFailedEntry(phone);
       return { success: true, sessionId };
     } catch (err) {
       bumpSessionStat(sessionId, 'failed');
+      pushMessageHistory({
+        kind: 'failed',
+        to,
+        sample: body,
+        eventType: detectEventType(body),
+        sessionId,
+        reason: err.message,
+      });
       if (phone) recordFailedNumber(phone, 'send_error', body);
       throw new Error(`Error enviando con ${sessionId}: ${err.message}`);
     }
@@ -982,6 +1050,13 @@ export async function sendMessage(to, body, sessionId = null) {
       cacheSentMessage(result);
       bumpSessionStat(id, 'sent');
       noteSuccessfulSend(to);
+      pushMessageHistory({
+        kind: 'sent',
+        to,
+        sample: body,
+        eventType: detectEventType(body),
+        sessionId: id,
+      });
       if (phone) clearFailedEntry(phone);
       return { success: true, sessionId: id };
     } catch (err) {
@@ -993,6 +1068,13 @@ export async function sendMessage(to, body, sessionId = null) {
 
   rolloverStatsIfNeeded();
   stats.failedSends += 1;
+  pushMessageHistory({
+    kind: 'failed',
+    to,
+    sample: body,
+    eventType: detectEventType(body),
+    reason: lastError?.message || 'No se pudo enviar',
+  });
   if (phone) recordFailedNumber(phone, 'send_error', body);
   throw new Error(`No se pudo enviar. Último error: ${lastError?.message || lastError}`);
 }

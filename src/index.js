@@ -28,6 +28,7 @@ import {
   recordThrottled,
   evaluateEventThrottle,
   getVersionInfo,
+  getMessageHistory,
 } from './baileys-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -79,20 +80,21 @@ async function handleNotify(request, reply) {
     : (settings.maxEventAgeMin ?? 20);
   const ageMs = getEventAgeMs(body);
   if (ageMs !== null && ageMs > maxAgeMin * 60 * 1000) {
-    recordDiscardedOld();
+    const reason = `Evento de hace ${Math.round(ageMs / 60000)} min (umbral ${maxAgeMin} min)`;
+    recordDiscardedOld(to, body, reason);
     request.log.warn(
       { to, ageMin: Math.round(ageMs / 60000), maxAgeMin, isAuxilio },
       'Evento descartado por antigüedad'
     );
     // 200 para que Traccar no lo reintente
-    return reply.send({ success: true, discarded: true, reason: `Evento de hace ${Math.round(ageMs / 60000)} min (umbral ${maxAgeMin} min)` });
+    return reply.send({ success: true, discarded: true, reason });
   }
 
   // Anti-ráfaga: máx 1 cada 3 min del mismo evento (destino+tipo+placa).
   // AUXILIO no se frena; solo avisa al admin si llega muy seguido.
   const throttle = evaluateEventThrottle(to, body);
   if (!throttle.allow) {
-    recordThrottled();
+    recordThrottled(to, body, throttle.reason);
     request.log.warn(
       { to, eventType: throttle.eventType, reason: throttle.reason },
       'Evento descartado por throttle (ráfaga)'
@@ -181,6 +183,8 @@ const pairHandler = async (request, reply) => {
     .summary-pill.on { background: #dcfce7; color: #15803d; }
     .summary-pill.off { background: #fee2e2; color: #b91c1c; }
     .summary-pill.wait { background: #fef3c7; color: #b45309; }
+    .summary-pill.clickable { cursor: pointer; }
+    .summary-pill.clickable:hover { filter: brightness(0.95); outline: 1px solid #9ca3af; }
     .connected { color: #16a34a; }
     .pending { color: #d97706; }
     .icon { font-size: 1.2em; }
@@ -270,6 +274,17 @@ const pairHandler = async (request, reply) => {
       </div>
     </div>
   </div>
+  <div id="historyModal" class="modal">
+    <div class="modal-inner" style="max-width:560px;">
+      <h3 id="historyTitle">Historial</h3>
+      <div class="modal-body" id="historyList">
+        <p>Cargando...</p>
+      </div>
+      <div style="padding:1rem; border-top:1px solid #e5e7eb;">
+        <button onclick="document.getElementById('historyModal').classList.remove('show')">Cerrar</button>
+      </div>
+    </div>
+  </div>
   <script>
     var STATUS_LABELS = {
       online: 'En línea',
@@ -296,10 +311,10 @@ const pairHandler = async (request, reply) => {
           totalFailed += dayStats.perSession[k].failed || 0;
         }
         statsHtml =
-          '<span class="summary-pill" style="background:#e0e7ff;color:#3730a3;">' + totalSent + ' enviados hoy</span>' +
-          (totalFailed ? '<span class="summary-pill off">' + totalFailed + ' fallidos</span>' : '') +
-          (dayStats.discardedOld ? '<span class="summary-pill wait">' + dayStats.discardedOld + ' descartados (viejos)</span>' : '') +
-          (dayStats.throttled ? '<span class="summary-pill wait">' + dayStats.throttled + ' limitados (ráfaga)</span>' : '');
+          '<span class="summary-pill clickable" data-history="sent" style="background:#e0e7ff;color:#3730a3;" title="Clic para ver detalle">' + totalSent + ' enviados hoy</span>' +
+          (totalFailed ? '<span class="summary-pill clickable off" data-history="failed" title="Clic para ver detalle">' + totalFailed + ' fallidos</span>' : '') +
+          (dayStats.discardedOld ? '<span class="summary-pill clickable wait" data-history="discarded_old" title="Clic para ver detalle">' + dayStats.discardedOld + ' descartados (viejos)</span>' : '') +
+          (dayStats.throttled ? '<span class="summary-pill clickable wait" data-history="throttled" title="Clic para ver detalle">' + dayStats.throttled + ' limitados (ráfaga)</span>' : '');
       }
       document.getElementById('summaryBar').innerHTML =
         '<span class="summary-pill on">' + counts.online + ' en línea</span>' +
@@ -307,6 +322,47 @@ const pairHandler = async (request, reply) => {
         (counts.connecting ? '<span class="summary-pill wait">' + counts.connecting + ' conectando</span>' : '') +
         (counts.unlinked ? '<span class="summary-pill wait">' + counts.unlinked + ' sin vincular</span>' : '') +
         statsHtml;
+      document.querySelectorAll('#summaryBar [data-history]').forEach(function(el) {
+        el.onclick = function() { showMessageHistory(el.getAttribute('data-history')); };
+      });
+    }
+    var HISTORY_TITLES = {
+      sent: 'Mensajes enviados (últimos)',
+      failed: 'Mensajes fallidos (últimos)',
+      discarded_old: 'Descartados por antigüedad (últimos)',
+      throttled: 'Limitados por ráfaga (últimos)'
+    };
+    function showMessageHistory(kind) {
+      var modal = document.getElementById('historyModal');
+      var list = document.getElementById('historyList');
+      document.getElementById('historyTitle').textContent = HISTORY_TITLES[kind] || 'Historial';
+      modal.classList.add('show');
+      list.innerHTML = '<p>Cargando...</p>';
+      fetch('/api/message-history?kind=' + encodeURIComponent(kind)).then(function(r) { return r.json(); }).then(function(data) {
+        var items = data.items || [];
+        if (items.length === 0) {
+          list.innerHTML = '<p>No hay registros recientes (máx. últimos 300 o 12 h; se reinicia al reiniciar el servidor).</p>';
+          return;
+        }
+        var html = '<p style="margin:0 0 0.5rem 0;font-size:0.85rem;color:#6b7280;">Historial en memoria · se borra solo tras 12 h o al superar 300 entradas.</p>';
+        for (var i = 0; i < items.length; i++) {
+          var it = items[i];
+          var when = it.ts ? new Date(it.ts).toLocaleString() : '';
+          html += '<div class="group-row" style="flex-direction:column;align-items:stretch;">' +
+            '<div style="display:flex;flex-wrap:wrap;gap:0.35rem;align-items:center;">' +
+              '<strong style="font-size:0.85em;">' + escapeHtml(when) + '</strong>' +
+              (it.eventType ? '<span class="badge">' + escapeHtml(it.eventType) + '</span>' : '') +
+              '<span style="font-family:monospace;font-size:0.8em;">' + escapeHtml(it.to || '') + '</span>' +
+              (it.sessionId ? '<span style="font-size:0.75em;color:#6b7280;">' + escapeHtml(it.sessionId) + '</span>' : '') +
+            '</div>' +
+            (it.reason ? '<div style="font-size:0.8em;color:#b45309;margin-top:0.2rem;">' + escapeHtml(it.reason) + '</div>' : '') +
+            (it.sample ? '<div style="font-size:0.82em;color:#4b5563;background:#f9fafb;border-radius:4px;padding:0.4rem;margin-top:0.35rem;white-space:pre-wrap;">' + escapeHtml(it.sample) + '</div>' : '') +
+          '</div>';
+        }
+        list.innerHTML = html;
+      }).catch(function() {
+        list.innerHTML = '<p class="msg err">Error al cargar el historial.</p>';
+      });
     }
     function renderSessions(list) {
       renderSummary(list);
@@ -615,6 +671,10 @@ fastify.post('/api/sessions/:id/reconnect', async (request, reply) => {
 
 // Estadísticas del día (enviados/fallidos por sesión, descartados por antigüedad)
 fastify.get('/api/stats', async () => ({ stats: getStats(), baileys: getVersionInfo() }));
+fastify.get('/api/message-history', async (request) => {
+  const kind = request.query?.kind || 'all';
+  return { kind, items: getMessageHistory(kind) };
+});
 
 // Números a los que no llegan los mensajes (sin WhatsApp o error de envío)
 fastify.get('/api/failed-numbers', async () => ({ numbers: getFailedNumbers() }));
