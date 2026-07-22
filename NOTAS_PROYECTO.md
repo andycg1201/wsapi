@@ -83,7 +83,8 @@ Si `git pull` falla por `package-lock.json` → `git checkout -- package-lock.js
   "maxEventAgeMin": 20,
   "auxilioMaxEventAgeMin": 60,
   "trafficSilenceDayMin": 20,
-  "trafficSilenceNightMin": 40,
+  "trafficSilenceEveningMin": 30,
+  "trafficSilenceNightMin": 45,
   "eventThrottleMin": 3,
   "eventBurstCount": 3,
   "eventBurstWindowSec": 60
@@ -107,9 +108,9 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 - ≥3 en 1 min → WhatsApp al admin (máx 1 aviso/10 min por clave)
 - **AUXILIO:** se envían todas; solo alerta de ráfaga
 
-### Silencio de tráfico / Traccar caído (`74a971d`)
-- Por VPS: si no hay ningún envío real
-- Día 07–22 Ecuador: **20 min** · Noche 22–07: **40 min** → alerta al admin
+### Silencio de tráfico / Traccar caído (`74a971d` + franjas 22-jul)
+- Por VPS: si no hay ningún envío real (hora Ecuador)
+- **05–19:** 20 min · **19–22:** 30 min · **22–05:** 45 min → alerta al admin
 - Primer mensaje tras alerta → aviso de **recuperación inmediato**
 - Tras `pm2 restart`: gracia = umbral (evita falsa alarma)
 - Las alertas al admin **no** reinician el contador de silencio

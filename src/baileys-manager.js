@@ -145,8 +145,9 @@ let settings = {
   adminPhone: null,
   maxEventAgeMin: 20,
   auxilioMaxEventAgeMin: 60,
-  trafficSilenceDayMin: 20,
-  trafficSilenceNightMin: 40,
+  trafficSilenceDayMin: 20,      // 05:00–19:00
+  trafficSilenceEveningMin: 30,  // 19:00–22:00
+  trafficSilenceNightMin: 45,    // 22:00–05:00
   eventThrottleMin: 3,       // máx 1 envío cada N min (mismo destino+tipo+placa)
   eventBurstCount: 3,        // ≥N en la ventana = ráfaga
   eventBurstWindowSec: 60,   // ventana para detectar ráfaga
@@ -159,7 +160,7 @@ function loadSettings() {
       console.log(
         `✓ Ajustes: umbral antigüedad ${settings.maxEventAgeMin} min` +
         ` · AUXILIO ${settings.auxilioMaxEventAgeMin ?? 60} min` +
-        ` · silencio ${settings.trafficSilenceDayMin ?? 20}/${settings.trafficSilenceNightMin ?? 40} min` +
+        ` · silencio ${settings.trafficSilenceDayMin ?? 20}/${settings.trafficSilenceEveningMin ?? 30}/${settings.trafficSilenceNightMin ?? 45} min` +
         ` · throttle ${settings.eventThrottleMin ?? 3} min` +
         (settings.adminPhone ? ` · alertas a ${settings.adminPhone}` : ' · sin número admin')
       );
@@ -442,11 +443,20 @@ function getEcuadorHour() {
 
 function getTrafficSilenceThresholdMs() {
   const hour = getEcuadorHour();
-  const isDay = hour >= 7 && hour < 22;
-  const min = isDay
-    ? (settings.trafficSilenceDayMin ?? 20)
-    : (settings.trafficSilenceNightMin ?? 40);
-  return { isDay, thresholdMs: min * 60 * 1000, thresholdMin: min };
+  // 05–19 → día · 19–22 → tarde · 22–05 → noche (hora Ecuador)
+  let band;
+  let min;
+  if (hour >= 5 && hour < 19) {
+    band = 'día (05–19)';
+    min = settings.trafficSilenceDayMin ?? 20;
+  } else if (hour >= 19 && hour < 22) {
+    band = 'tarde (19–22)';
+    min = settings.trafficSilenceEveningMin ?? 30;
+  } else {
+    band = 'noche (22–05)';
+    min = settings.trafficSilenceNightMin ?? 45;
+  }
+  return { band, thresholdMs: min * 60 * 1000, thresholdMin: min };
 }
 
 /** Marca un envío real (no alertas al admin) y avisa recuperación si había silencio */
@@ -468,7 +478,7 @@ function checkTrafficSilence() {
   const anyOnline = [...sessions.values()].some((e) => e.connected);
   if (!anyOnline) return;
 
-  const { isDay, thresholdMs, thresholdMin } = getTrafficSilenceThresholdMs();
+  const { band, thresholdMs, thresholdMin } = getTrafficSilenceThresholdMs();
   const silentMs = Date.now() - lastSuccessfulSendAt;
   if (silentMs < thresholdMs) return;
   if (trafficSilenceAlerted) return;
@@ -476,9 +486,8 @@ function checkTrafficSilence() {
   trafficSilenceAlerted = true;
   const host = os.hostname();
   const silentMin = Math.round(silentMs / 60000);
-  const franja = isDay ? 'día (07–22)' : 'noche (22–07)';
   sendAdminAlert(
-    `Sin envíos en ${host} desde hace ${silentMin} min (umbral ${thresholdMin} min · ${franja}).\n` +
+    `Sin envíos en ${host} desde hace ${silentMin} min (umbral ${thresholdMin} min · ${band}).\n` +
     `Las sesiones WhatsApp pueden estar en línea, pero no llega tráfico — revisa si Traccar está caído o no está notificando a este VPS.`
   );
 }
