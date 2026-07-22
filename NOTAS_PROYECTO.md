@@ -1,6 +1,6 @@
 # Notas del proyecto WSAPI - Donde quedamos
 
-**Fecha:** 14 de julio de 2026 (actualizado — sesión grande: Baileys 7, alertas, filtro, etc.)
+**Fecha:** 22 de julio de 2026 (actualizado)
 
 ---
 
@@ -16,45 +16,30 @@ Sistema de notificaciones WhatsApp **sin UltraMsg**. Baileys con múltiples núm
 
 | VPS | IP | Sesiones | Acceso |
 |-----|-----|----------|--------|
-| **VPS 1 (wsapi-vps)** | 46.225.142.215 | 5 | **SSH directo** (desde 14-jul, vía `setup-vps.sh`) o consola Hetzner |
-| **VPS 2** | 46.225.92.152 | 6 | SSH clave `id_ed25519.pub` |
+| **VPS 1 (wsapi-vps)** | 46.225.142.215 | ~5 | SSH directo + consola Hetzner |
+| **VPS 2 (halconsat2)** | 46.225.92.152 | ~6 | SSH clave `id_ed25519.pub` |
 
-- **Ambos VPS al día** con el mismo código, `settings.json` (alertas a 593997652586) y **Baileys 7.0.0-rc13**.
-- **Ojo consola Hetzner:** el teclado cambia caracteres (`{`→`[`, `"`→`'`, `>`→`.`). Preferir SSH o scripts del repo (`setup-vps.sh`).
+- **Ambos VPS al día**, mismo código, `settings.json` con alertas a **593997652586**, **Baileys 7.0.0-rc13**.
+- **Admin WhatsApp:** 593997652586 (0997652586 Ecuador).
+- **Ojo consola Hetzner:** el teclado cambia caracteres (`{`→`[`, `"`→`'`, `>`→`.`). Preferir SSH o `setup-vps.sh` / `update.sh`.
+- **Pi (192.168.100.6):** liberado. No producción. · **ngrok:** ya no se usa.
 
-- **Pi (192.168.100.6):** liberado. No producción.
-- **ngrok:** ya no se usa.
-
-### Estabilidad de sesiones ✅
+### Commits relevantes (resumen)
 
 | Commit | Qué hace |
 |--------|----------|
-| `5ad5afb` | Keep-alive: presencia cada 10 min, `markOnlineOnConnect` |
-| `29647c7` | Panel: pastillas verde/rojo/amarillo/azul + Reconectar |
-| `e4bd8ff` | **Reconexión inteligente** + health check cada 2 min |
-| `2f050ad` | Fix QR sesión nueva: no usar `reconnectSession` sin credenciales |
-| `430ab7a` | Fix QR: no reiniciar conexión si el QR ya está listo |
-| `04a30d8` | Fix QR: esperar hasta 20 s mientras Baileys genera el código |
-| `bd21c70` | **Fix "Esperando el mensaje"**: getMessage + retry (máx 3 intentos) |
-| `96c6d25` | **Números con problemas**: botón en panel, onWhatsApp + registro de fallos |
-| `709b6e6` | **Filtro antigüedad + stats + alertas admin + backup + update.sh** |
-| `be58546`/`2ea1164` | `setup-vps.sh`: instala settings.json + clave SSH (para consola Hetzner) |
-| `16d9081` | **Baileys 6.7.21 → 7.0.0-rc13** (fix raíz de Bad MAC / LID) |
-| `4277ef8` | **Chequeo diario versión Baileys**: badge en /pair + alerta WhatsApp |
-
-**Reconexión (`e4bd8ff`):**
-- Reintento 2 s / 5 s / 15 s según código de error WhatsApp
-- Log del motivo en `pm2 logs` (401, 515, 428, etc.)
-- Corrige sockets “muertos” que bloqueaban reconectar
-- Health check: si sesión vinculada queda roja >2 min → reconecta sola
-- **No requiere re-escanear QR** al desplegar cambios de reconexión/keep-alive
-
-**Vincular sesión nueva (`2f050ad` → `04a30d8`):**
-- Al pulsar **+** se crea la sesión; al pulsar **Mostrar QR** (o auto al crear) se conecta **bajo demanda**
-- `/api/qr/:id` espera hasta 20 s en servidor — no responde vacío antes de tiempo
-- **No reinicia** la conexión si el QR ya está generado (evita borrarlo en cada poll)
-- Sesión sin vincular que se cae → no reintenta en bucle; espera nuevo clic en **Mostrar QR**
-- Log útil: `[id] QR generado - visible en /pair`
+| `e4bd8ff` | Reconexión inteligente + health check cada 2 min |
+| `2f050ad`→`04a30d8` | Fix QR sesión nueva |
+| `bd21c70` | Fix "Esperando el mensaje" (getMessage + retry máx 3) |
+| `96c6d25` | Botón Problemas + onWhatsApp |
+| `709b6e6` | Filtro antigüedad + stats + alertas sesión + backup + update.sh |
+| `16d9081` | **Baileys → 7.0.0-rc13** |
+| `4277ef8` | Chequeo diario versión Baileys |
+| `6a953d5`/`7151340` | AUXILIO hasta 60 min · resto **20 min** antigüedad |
+| `7391fc9` | Stats del día en **hora Ecuador** (no UTC) |
+| `74a971d` | Alerta silencio de tráfico (posible Traccar caído) |
+| `ea88d23` | Anti-ráfaga: 1 cada 3 min (AUXILIO sin freno) |
+| `3c32fd2` | Historial clicable enviados/descartados/limitados |
 
 ### Panel `/pair`
 
@@ -65,47 +50,116 @@ Sistema de notificaciones WhatsApp **sin UltraMsg**. Baileys con múltiples núm
 | **Amarillo** | Sin vincular |
 | **Azul** | Conectando… |
 
-- Auto-refresh cada 5 s · Resumen arriba: en línea/desconectadas + **enviados hoy / fallidos / descartados**
-- Botón rojo **"Problemas"**: números sin WhatsApp o con error de envío (con mensaje de muestra para identificar el cliente y depurarlo de Traccar)
-- Badge amarillo **"Baileys X disponible"** cuando sale versión nueva
-- Contador por sesión: "123 hoy · 2 err"
-- Badge **Exclusiva/Dinámica** (clic para alternar): dinámica = entra al round-robin; exclusiva = solo envía con `&session=` explícito (para clientes que deben recibir siempre del mismo número)
 - http://46.225.142.215:3000/pair · http://46.225.92.152:3000/pair
+- Auto-refresh 5 s · pastillas de resumen
+- **Clic en pastillas** enviados / fallidos / descartados / limitados → modal con detalle (muestra del mensaje)
+- Botón rojo **"Problemas"** · badge Baileys nueva versión · Exclusiva/Dinámica · contador por sesión
 
 ### URLs Traccar
 
 **VPS 1:** `http://46.225.142.215:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%&priority=10`  
 **VPS 2:** `http://46.225.92.152:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%&priority=10`  
-Por sesión: `&session=numero_1` — IDs en `/api/sessions`
+Por sesión: `&session=numero_XXXX` — IDs en `/api/sessions`
 
 ---
 
 ## Actualizar código en VPS
 
-**Con un solo comando** (desde `709b6e6`):
-
 ```bash
 bash /opt/wsapi/update.sh
 ```
 
-**O manual (consola Hetzner, un comando por línea):**
+O desde PC: `ssh root@46.225.92.152` / `ssh root@46.225.142.215` + mismo comando.
 
-```bash
-cd /opt/wsapi
-```
-```bash
-git pull origin main
-```
-```bash
-npm install
-```
-```bash
-pm2 restart wsapi
+Si `git pull` falla por `package-lock.json` → `git checkout -- package-lock.json` primero.
+
+---
+
+## settings.json (ambos VPS)
+
+```json
+{
+  "adminPhone": "593997652586",
+  "maxEventAgeMin": 20,
+  "auxilioMaxEventAgeMin": 60,
+  "trafficSilenceDayMin": 20,
+  "trafficSilenceNightMin": 40,
+  "eventThrottleMin": 3,
+  "eventBurstCount": 3,
+  "eventBurstWindowSec": 60
+}
 ```
 
-**Desde PC (ambos):** `ssh root@46.225.92.152` o `ssh root@46.225.142.215` + `bash /opt/wsapi/update.sh`.
+Plantillas en repo: `config/settings.example.json` · `config/settings.halconsoft.json`
 
-**Nota:** si `git pull` falla por `package-lock.json` modificado → `git checkout -- package-lock.json` primero.
+---
+
+## Funciones activas (detalle)
+
+### Filtro de antigüedad
+- Parsea `Hora: YYYY-MM-DD HH:mm:ss` (también dentro de `Fecha y Hora:` de AUXILIO)
+- Normal: **20 min** · **AUXILIO: 60 min**
+- Descarte → HTTP 200 (Traccar no reintenta)
+
+### Anti-ráfaga (`ea88d23`)
+- Clave: destino + tipo (EXCESO/INGRESO/SALIDA/…) + placa/unidad
+- Máx **1 envío cada 3 min** del mismo evento
+- ≥3 en 1 min → WhatsApp al admin (máx 1 aviso/10 min por clave)
+- **AUXILIO:** se envían todas; solo alerta de ráfaga
+
+### Silencio de tráfico / Traccar caído (`74a971d`)
+- Por VPS: si no hay ningún envío real
+- Día 07–22 Ecuador: **20 min** · Noche 22–07: **40 min** → alerta al admin
+- Primer mensaje tras alerta → aviso de **recuperación inmediato**
+- Tras `pm2 restart`: gracia = umbral (evita falsa alarma)
+- Las alertas al admin **no** reinician el contador de silencio
+
+### Historial del panel (`3c32fd2`)
+- Clic en pastillas → lista reciente
+- Memoria: máx **300** entradas · TTL **12 h** · ~poca RAM
+- No disco · se vacía al reiniciar PM2
+- API: `GET /api/message-history?kind=sent|failed|discarded_old|throttled`
+
+### Stats del día
+- Medianoche **Ecuador** (`America/Guayaquil`), no UTC del VPS
+- (Antes se reiniciaba a las 19:00 Ecuador por UTC)
+
+### Alertas sesión caída
+- Sesión vinculada >10 min offline → WhatsApp al admin + aviso al recuperar
+
+### Retry "Esperando el mensaje"
+- `getMessage` + cache 1 h + máx 3 reintentos
+
+### Problemas (números sin WhatsApp)
+- Botón en panel · `config/failed_numbers.json` · muestra del mensaje
+
+### Baileys 7.0.0-rc13
+- Patch: `patches/baileys+7.0.0-rc13.patch` (Platform.MACOS)
+- Chequeo diario npm → badge + WhatsApp si hay versión nueva
+
+### Backup / scripts
+- `backups/auth_YYYY-MM-DD.tar.gz` (últimos 7)
+- `update.sh` · `setup-vps.sh`
+
+### Dinámica vs Exclusiva
+- **Dinámica:** round-robin (tráfico general sin `&session=`)
+- **Exclusiva:** solo con `&session=` (cliente que debe recibir siempre del mismo número)
+- Dejar la mayoría dinámicas; exclusiva solo cuando haga falta
+
+---
+
+## Pendiente (para después)
+
+| Tema | Notas |
+|------|-------|
+| **Monitorear Bad MAC** | Comparar con pre-v7; ver si bajan "Esperando el mensaje" en clientes |
+| **Revisar botón Problemas** (Andre) | Depurar de Traccar números sin WhatsApp |
+| **Panel único 2 VPS** | Una vista con ambos servidores |
+| **IDs consecutivos** | `numero_1, 2, 3…` al crear sesión |
+| **Proxy Bright Data** | Decidir con stats de uso |
+| **Baileys 7.0 estable** | Cuando el badge avise; de noche + snapshot |
+
+**Resueltos jul-2026:** QR · retry · Problemas · filtro antigüedad (+ AUXILIO 60 / resto 20) · stats Ecuador · alertas admin · silencio Traccar · anti-ráfaga · historial panel · Baileys 7 · SSH ambos VPS · backups · update.sh.
 
 ---
 
@@ -115,109 +169,17 @@ pm2 restart wsapi
 pm2 logs wsapi --lines 50
 ```
 
-Buscar: `Conexión cerrada (código …)`, `Health check`, `Reconectando en X s`, `QR generado`.
+Buscar: `Conexión cerrada`, `Health check`, `Evento descartado`, `throttle`, `Sin envíos`, `QR generado`, `Ajustes:`.
 
-Sesión roja persistente → **Reconectar** en `/pair` (sin QR).
-
-**QR no aparece al crear sesión:**
-1. Confirmar que el VPS tiene `04a30d8` o posterior (`git log -1 --oneline` en `/opt/wsapi`)
-2. Pulsar **Mostrar QR** y esperar ~5–15 s
-3. `pm2 logs wsapi --lines 30` — debe salir `QR generado`
-4. Si sale `QR refs attempts ended` → pulsar **Mostrar QR** de nuevo (el código expiró)
-
----
-
-## Pendiente (para después)
-
-| Tema | Notas |
-|------|-------|
-| **Monitorear Bad MAC post-Baileys 7** | En 3-4 días: `grep -c 'Bad MAC' /root/.pm2/logs/wsapi-error.log` (referencia pre-v7: 656.415 acumulados en VPS 2). Confirmar con clientes que bajen los "Esperando el mensaje" |
-| **Revisar botón "Problemas"** (tarea Andre) | En unos días, depurar de Traccar los números sin WhatsApp que aparezcan |
-| **Panel único 2 VPS** | Ver ambos servidores en una vista (SSH ya disponible en ambos) |
-| **IDs consecutivos (numero_1, 2, 3…)** | Cambio en `POST /api/sessions` |
-| **Proxy Bright Data** | ~11 cuentas, 2 VPS. Decidir con las stats de un par de semanas |
-| **Baileys 7.0 estable** | Cuando el badge/alerta avise, actualizar igual que el 14-jul (de noche, snapshot antes) |
-
-**Resueltos 14-jul-2026:** fixes QR · fix "Esperando el mensaje" (retry) · botón Problemas · filtro antigüedad · stats · alertas admin · backups diarios · update.sh · setup-vps.sh · SSH a ambos VPS · settings.json en ambos · **Baileys 7.0.0-rc13** · chequeo diario de versión.
-
----
-
-## Baileys 7.0.0-rc13 (`16d9081` — 14-jul-2026)
-
-- Actualizado desde 6.7.21. Motivo: v7 corrige de raíz los **Bad MAC** / "Esperando el mensaje" (migración LID de WhatsApp: locks canónicos PN/LID, retención de sesión PN, grace period de prekeys)
-- **Patch MACOS regenerado**: `patches/baileys+7.0.0-rc13.patch` (mismo cambio, la v7 aún trae Platform.WEB)
-- Probado: arranque local + **ambos VPS sin re-escanear QR** (las 11 sesiones reconectaron con el auth existente) + envío de prueba OK desde cada VPS
-- Usuario creó **snapshot** de los VPS antes de actualizar (14-jul) — restaurar desde Hetzner si algo sale mal
-- Rollback rápido sin snapshot: `git checkout 4c086ae -- package.json package-lock.json patches/` + `npm install` + `pm2 restart wsapi`
-- Nota deploy: si `git pull` falla por `package-lock.json` local → `git checkout -- package-lock.json` primero
-
----
-
-## Funciones nuevas (`bd21c70` → `709b6e6`)
-
-### Fix "Esperando el mensaje" (`bd21c70`)
-- Cache de mensajes enviados (1 h) + `getMessage`: si el cliente no puede descifrar, WhatsApp pide reintento y WSAPI **reenvía automáticamente**
-- Máximo **3 reintentos**, luego se descarta (no congestiona)
-- Log: `Retry solicitado para mensaje X - reenviando`
-- Causa raíz de los "Esperando el mensaje": faltaba `getMessage` + los `Bad MAC` por sesiones Signal corruptas
-
-### Números con problemas (`96c6d25`)
-- Botón rojo **"Números con problemas"** en `/pair`
-- Verifica con `onWhatsApp` (cache 24 h) si el número existe antes de enviar
-- Registra: número, motivo (sin WhatsApp / error envío), **mensaje de muestra** (identifica al cliente por vehículo/placa), intentos, fecha
-- Persistido en `config/failed_numbers.json` · botón **Quitar** al depurar de Traccar
-- Si el número vuelve a funcionar, sale solo de la lista
-
-### Filtro de antigüedad ✅ IMPLEMENTADO (`709b6e6`)
-- Formato confirmado con mensajes reales: `Hora: 2026-07-14 18:12:12` (hora Ecuador, UTC-5)
-- Eventos con más de **15 min** → descartados con HTTP 200 (Traccar no reintenta)
-- Umbral configurable en `config/settings.json` → `maxEventAgeMin`
-- Contador "descartados (viejos)" visible en `/pair` · log `Evento descartado por antigüedad`
-- Mensajes sin línea `Hora:` se envían normal
-
-### Estadísticas del día (`709b6e6`)
-- `/api/stats` + pastillas en `/pair`: enviados hoy, fallidos, descartados
-- Contador por sesión junto a cada número ("123 hoy · 2 err")
-- En memoria: se reinician a medianoche o al reiniciar PM2
-
-### Alertas al admin (`709b6e6`)
-- Crear `config/settings.json` en cada VPS (copiar de `settings.example.json`):
-
-```json
-{ "adminPhone": "5939XXXXXXXX", "maxEventAgeMin": 15 }
-```
-
-- Si una sesión vinculada lleva **>10 min caída** sin reconectar → WhatsApp al admin
-- También avisa cuando se recupera · **Sin `settings.json` no hay alertas** (todo lo demás funciona igual)
-
-### Backup diario (`709b6e6`)
-- `backups/auth_YYYY-MM-DD.tar.gz` (auth_sessions + config), conserva últimos 7
-- Primer backup 1 min después de arrancar
-- Restaurar: `tar -xzf backups/auth_XXXX.tar.gz -C /opt/wsapi` + `pm2 restart wsapi`
-
-### Chequeo de versión Baileys (`4277ef8`)
-- Consulta npm 1 vez/día (y 3 min tras arrancar)
-- Versión nueva → badge amarillo en `/pair` + WhatsApp al admin (1 sola vez por versión)
-- `/api/stats` incluye `baileys: { installed, latest, updateAvailable }`
-
-### setup-vps.sh (`be58546`)
-- Para VPS nuevos o consola Hetzner (teclado problemático): `bash setup-vps.sh`
-- Instala `config/settings.json` (desde `settings.halconsoft.json` del repo) + clave SSH del PC + restart
+Sesión roja → **Reconectar** en `/pair` (sin QR).
 
 ---
 
 ## Recordatorios
 
-- **Clave SSH:** `C:\Users\andre\.ssh\id_ed25519.pub` (pública)
-- **Contraseña VPS:** Hetzner → Console o Rescue
-- **Nuevo VPS:** `GUIA_INSTALAR_VPS.txt`
-- **UltraMsg vs Baileys:** puede haber caídas puntuales; reconexión automática mitiga pero no es 100 %
-
----
-
-## Proxy (planificado)
-
-Bright Data · SOCKS5 · “apliquemos proxy” cuando digas.
+- **Clave SSH:** `C:\Users\andre\.ssh\id_ed25519.pub`
+- **Nuevo VPS:** `GUIA_INSTALAR_VPS.txt` + `bash setup-vps.sh`
+- Actualizaciones Baileys: local → 1 VPS → verificar sin QR → 2.º VPS
 
 ---
 
