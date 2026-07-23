@@ -1,6 +1,6 @@
 # Notas del proyecto WSAPI - Donde quedamos
 
-**Fecha:** 22 de julio de 2026 (actualizado)
+**Fecha:** 23 de julio de 2026 (actualizado)
 
 ---
 
@@ -38,8 +38,10 @@ Sistema de notificaciones WhatsApp **sin UltraMsg**. Baileys con múltiples núm
 | `6a953d5`/`7151340` | AUXILIO hasta 60 min · resto **20 min** antigüedad |
 | `7391fc9` | Stats del día en **hora Ecuador** (no UTC) |
 | `74a971d` | Alerta silencio de tráfico (posible Traccar caído) |
-| `ea88d23` | Anti-ráfaga: 1 cada 3 min (AUXILIO sin freno) |
+| `ea88d23` | Anti-ráfaga: 1 cada 3 min |
 | `3c32fd2` | Historial clicable enviados/descartados/limitados |
+| `ec3f56d` | Silencio Traccar: franjas **05–19 / 19–22 / 22–05** → **20 / 30 / 45 min** |
+| `debe684` | **ENCENDIDO/APAGADO sin throttle** (igual que AUXILIO/SOS) |
 
 ### Panel `/pair`
 
@@ -108,7 +110,7 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 - ≥3 en 1 min → WhatsApp al admin (máx 1 aviso/10 min por clave)
 - **Sin freno** (se envían todas): **AUXILIO/SOS**, **ENCENDIDO/ON**, **APAGADO/OFF** — solo alerta de ráfaga
 
-### Silencio de tráfico / Traccar caído (`74a971d` + franjas 22-jul)
+### Silencio de tráfico / Traccar caído (`74a971d` / `ec3f56d`)
 - Por VPS: si no hay ningún envío real (hora Ecuador)
 - **05–19:** 20 min · **19–22:** 30 min · **22–05:** 45 min → alerta al admin
 - Primer mensaje tras alerta → aviso de **recuperación inmediato**
@@ -160,7 +162,7 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 | **Proxy Bright Data** | Decidir con stats de uso |
 | **Baileys 7.0 estable** | Cuando el badge avise; de noche + snapshot |
 
-**Resueltos jul-2026:** QR · retry · Problemas · filtro antigüedad (+ AUXILIO 60 / resto 20) · stats Ecuador · alertas admin · silencio Traccar · anti-ráfaga · historial panel · Baileys 7 · SSH ambos VPS · backups · update.sh.
+**Resueltos jul-2026:** QR · retry · Problemas · filtro antigüedad (+ AUXILIO 60 / resto 20) · stats Ecuador · alertas admin · silencio Traccar (20/30/45) · anti-ráfaga (EXCESO etc.; SOS/ON/OFF libres) · historial panel · Baileys 7 · SSH ambos VPS · backups · update.sh.
 
 ---
 
