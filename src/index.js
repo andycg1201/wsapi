@@ -91,7 +91,7 @@ async function handleNotify(request, reply) {
   }
 
   // Anti-ráfaga: máx 1 cada 3 min del mismo evento (destino+tipo+placa).
-  // AUXILIO / ENCENDIDO / APAGADO no se frenan; solo avisan al admin si llegan en ráfaga.
+  // Sin freno: AUXILIO/ENCENDIDO/APAGADO, e INGRESO/SALIDA de flota CMA/CMP.
   const throttle = evaluateEventThrottle(to, body);
   if (!throttle.allow) {
     recordThrottled(to, body, throttle.reason);

@@ -302,6 +302,18 @@ function isNoThrottleEvent(eventType) {
   return eventType === 'AUXILIO' || eventType === 'ENCENDIDO' || eventType === 'APAGADO';
 }
 
+/** Flota Mariano Acosta (CMA) / Campesinos (CMP), ej. "10 CMA", "08 CMP" */
+function isCmaOrCmpFleet(body) {
+  return /\b\d{1,4}\s*CM[AP]\b/i.test(String(body));
+}
+
+/** Sin freno: SOS/ON/OFF, o INGRESO/SALIDA de vehículos CMA/CMP */
+function shouldSkipThrottle(eventType, body) {
+  if (isNoThrottleEvent(eventType)) return true;
+  if ((eventType === 'INGRESO' || eventType === 'SALIDA') && isCmaOrCmpFleet(body)) return true;
+  return false;
+}
+
 function detectVehicleKey(body) {
   const text = String(body);
   const placa = /Placa[:\s]*([A-Z0-9\-]+)/i.exec(text);
@@ -356,20 +368,21 @@ export function evaluateEventThrottle(to, body) {
     if (now >= until) {
       burstAlertedUntil.set(key, now + 10 * 60 * 1000); // no reavisar 10 min
       const sample = String(body).slice(0, 180).replace(/\s+/g, ' ');
+      const noThrottle = shouldSkipThrottle(eventType, body);
       sendAdminAlert(
         `Ráfaga de notificaciones en ${os.hostname()}.\n` +
         `Tipo: ${eventType} · Destino: ${to} · Unidad/placa: ${vehicle}\n` +
         `${hits.length} en el último minuto` +
-        (isNoThrottleEvent(eventType)
-          ? ` (${eventType}: se siguen enviando todas).`
+        (noThrottle
+          ? ` (${eventType}${isCmaOrCmpFleet(body) ? ' CMA/CMP' : ''}: se siguen enviando todas).`
           : ` — se limitará a 1 cada ${throttleMin} min.`) +
         `\nMuestra: ${sample}`
       );
     }
   }
 
-  // AUXILIO / ENCENDIDO / APAGADO: nunca frenar
-  if (isNoThrottleEvent(eventType)) {
+  // AUXILIO / ENCENDIDO / APAGADO, o INGRESO/SALIDA de flota CMA/CMP: nunca frenar
+  if (shouldSkipThrottle(eventType, body)) {
     lastEventSentAt.set(key, now);
     return { allow: true, eventType };
   }
