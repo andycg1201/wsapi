@@ -27,6 +27,7 @@ import {
   recordDiscardedOld,
   recordThrottled,
   evaluateEventThrottle,
+  resolveSendSessionId,
   getVersionInfo,
   getMessageHistory,
 } from './baileys-manager.js';
@@ -81,9 +82,10 @@ async function handleNotify(request, reply) {
   const ageMs = getEventAgeMs(body);
   if (ageMs !== null && ageMs > maxAgeMin * 60 * 1000) {
     const reason = `Evento de hace ${Math.round(ageMs / 60000)} min (umbral ${maxAgeMin} min)`;
-    recordDiscardedOld(to, body, reason);
+    const sessionId = resolveSendSessionId(session || null);
+    recordDiscardedOld(to, body, reason, sessionId);
     request.log.warn(
-      { to, ageMin: Math.round(ageMs / 60000), maxAgeMin, isAuxilio },
+      { to, sessionId, ageMin: Math.round(ageMs / 60000), maxAgeMin, isAuxilio },
       'Evento descartado por antigüedad'
     );
     // 200 para que Traccar no lo reintente
@@ -94,9 +96,10 @@ async function handleNotify(request, reply) {
   // Sin freno: AUXILIO/ENCENDIDO/APAGADO, e INGRESO/SALIDA de flota CMA/CMP.
   const throttle = evaluateEventThrottle(to, body);
   if (!throttle.allow) {
-    recordThrottled(to, body, throttle.reason);
+    const sessionId = resolveSendSessionId(session || null);
+    recordThrottled(to, body, throttle.reason, sessionId);
     request.log.warn(
-      { to, eventType: throttle.eventType, reason: throttle.reason },
+      { to, sessionId, eventType: throttle.eventType, reason: throttle.reason },
       'Evento descartado por throttle (ráfaga)'
     );
     return reply.send({ success: true, discarded: true, throttled: true, reason: throttle.reason });

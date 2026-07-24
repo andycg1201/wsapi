@@ -239,7 +239,7 @@ function bumpSessionStat(sessionId, field) {
   stats.perSession[sessionId][field] += 1;
 }
 
-export function recordDiscardedOld(to, body, reason) {
+export function recordDiscardedOld(to, body, reason, sessionId = null) {
   rolloverStatsIfNeeded();
   stats.discardedOld += 1;
   pushMessageHistory({
@@ -248,10 +248,11 @@ export function recordDiscardedOld(to, body, reason) {
     eventType: body ? detectEventType(body) : null,
     sample: body,
     reason: reason || 'Antigüedad',
+    sessionId: sessionId || null,
   });
 }
 
-export function recordThrottled(to, body, reason) {
+export function recordThrottled(to, body, reason, sessionId = null) {
   rolloverStatsIfNeeded();
   stats.throttled += 1;
   pushMessageHistory({
@@ -260,6 +261,7 @@ export function recordThrottled(to, body, reason) {
     eventType: body ? detectEventType(body) : null,
     sample: body,
     reason: reason || 'Ráfaga',
+    sessionId: sessionId || null,
   });
 }
 
@@ -294,6 +296,7 @@ function detectEventType(body) {
   if (/EXCESO/.test(head)) return 'EXCESO';
   if (/INGRESO/.test(head)) return 'INGRESO';
   if (/SALIDA/.test(head)) return 'SALIDA';
+  if (/BATER[IÍ]A|BATTERY/.test(head) || firstLine === 'BATERIA' || firstLine === 'BATERÍA') return 'BATERIA';
   return 'OTRO';
 }
 
@@ -1015,6 +1018,17 @@ function getConnectedSockets(dynamicOnly = false) {
     });
   }
   return list;
+}
+
+/**
+ * Sesión que usaría el próximo envío (sin avanzar round-robin).
+ * Si sessionId viene en la petición, se usa esa; si no, la siguiente dinámica conectada.
+ */
+export function resolveSendSessionId(sessionId = null) {
+  if (sessionId) return String(sessionId);
+  const connected = getConnectedSockets(true);
+  if (connected.length === 0) return null;
+  return connected[roundRobinIndex % connected.length].id;
 }
 
 /**
