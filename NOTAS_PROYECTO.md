@@ -1,12 +1,25 @@
 # Notas del proyecto WSAPI - Donde quedamos
 
-**Fecha:** 23 de julio de 2026 (actualizado)
+**Fecha:** 28 de julio de 2026 (actualizado)
 
 ---
 
 ## ¿Qué es el proyecto?
 
 Sistema de notificaciones WhatsApp **sin UltraMsg**. Baileys con múltiples números vinculados. Compatible con Traccar. ~2000 mensajes/día repartidos entre ~11 números en 2 VPS.
+
+---
+
+## Decisión Baileys (28 jul 2026)
+
+Hay `baileys@7.0.0-rc14` en npm (RC / pre-estable). **Decidido: quedarnos en `7.0.0-rc13`.**
+
+- Producción estable con rc13 + patch MACOS (`patches/baileys+7.0.0-rc13.patch`).
+- Subir a rc14 **no es necesario** mientras no haya fallos (Bad MAC, caídas, rechazo de WhatsApp).
+- rc14 tocaría `validate-connection` → habría que **regenerar el parche** y desplegar con cuidado (local → VPS1 → VPS2 + backup `auth_sessions`).
+- Próxima actualización seria: cuando salga **7.0.0 estable**, o si rc13 empieza a fallar.
+
+El badge/aviso de “hay versión nueva” puede seguir apareciendo; **ignorar** salvo urgencia.
 
 ---
 
@@ -19,7 +32,7 @@ Sistema de notificaciones WhatsApp **sin UltraMsg**. Baileys con múltiples núm
 | **VPS 1 (wsapi-vps)** | 46.225.142.215 | ~5 | SSH directo + consola Hetzner |
 | **VPS 2 (halconsat2)** | 46.225.92.152 | ~6 | SSH clave `id_ed25519.pub` |
 
-- **Ambos VPS al día**, mismo código, `settings.json` con alertas a **593997652586**, **Baileys 7.0.0-rc13**.
+- **Ambos VPS al día**, mismo código, `settings.json` con alertas a **593997652586**, **Baileys 7.0.0-rc13** (rc14 disponible; **no actualizar** por ahora).
 - **Admin WhatsApp:** 593997652586 (0997652586 Ecuador).
 - **Ojo consola Hetzner:** el teclado cambia caracteres (`{`→`[`, `"`→`'`, `>`→`.`). Preferir SSH o `setup-vps.sh` / `update.sh`.
 - **Pi (192.168.100.6):** liberado. No producción. · **ngrok:** ya no se usa.
@@ -42,6 +55,8 @@ Sistema de notificaciones WhatsApp **sin UltraMsg**. Baileys con múltiples núm
 | `3c32fd2` | Historial clicable enviados/descartados/limitados |
 | `ec3f56d` | Silencio Traccar: franjas **05–19 / 19–22 / 22–05** → **20 / 30 / 45 min** |
 | `debe684` | **ENCENDIDO/APAGADO sin throttle** (igual que AUXILIO/SOS) |
+| `3f65c13` | INGRESO/SALIDA flota **CMA/CMP** sin throttle |
+| `15743d1` | Historial limitados/descartados con **sessionId** + tipo BATERIA |
 
 ### Panel `/pair`
 
@@ -108,7 +123,8 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 - Clave: destino + tipo (EXCESO/INGRESO/SALIDA/…) + placa/unidad
 - Máx **1 envío cada 3 min** del mismo evento
 - ≥3 en 1 min → WhatsApp al admin (máx 1 aviso/10 min por clave)
-- **Sin freno** (se envían todas): **AUXILIO/SOS**, **ENCENDIDO/ON**, **APAGADO/OFF**, e **INGRESO/SALIDA** de flota **CMA/CMP** (ej. 10 CMA, 08 CMP) — solo alerta de ráfaga
+- **Sin freno** (se envían todas): **AUXILIO/SOS**, **ENCENDIDO/ON**, **APAGADO/OFF**, e **INGRESO/SALIDA** de flota **CMA/CMP** (Mariano Acosta; ej. 10 CMA, 08 CMP)
+- **Aviso admin por ráfaga:** normal (BATERIA/EXCESO/SOS/etc.). **Excepción:** INGRESO/SALIDA de CMA/CMP **no** avisan al admin (siguen enviándose a clientes)
 
 ### Silencio de tráfico / Traccar caído (`74a971d` / `ec3f56d`)
 - Por VPS: si no hay ningún envío real (hora Ecuador)
@@ -136,9 +152,10 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 ### Problemas (números sin WhatsApp)
 - Botón en panel · `config/failed_numbers.json` · muestra del mensaje
 
-### Baileys 7.0.0-rc13
+### Baileys 7.0.0-rc13 (actual en prod — mantener)
 - Patch: `patches/baileys+7.0.0-rc13.patch` (Platform.MACOS)
 - Chequeo diario npm → badge + WhatsApp si hay versión nueva
+- **rc14 disponible pero descartado por ahora** (RC; riesgo del parche). Ver decisión arriba.
 
 ### Backup / scripts
 - `backups/auth_YYYY-MM-DD.tar.gz` (últimos 7)
@@ -155,14 +172,15 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 
 | Tema | Notas |
 |------|-------|
+| **Baileys rc14 / 7.0 estable** | **No urgente.** Quedamos en rc13. Valorar solo si hay fallos o cuando salga **7.0.0 estable** (noche + snapshot + regenerar patch). |
 | **Monitorear Bad MAC** | Comparar con pre-v7; ver si bajan "Esperando el mensaje" en clientes |
 | **Revisar botón Problemas** (Andre) | Depurar de Traccar números sin WhatsApp |
 | **Panel único 2 VPS** | Una vista con ambos servidores |
 | **IDs consecutivos** | `numero_1, 2, 3…` al crear sesión |
 | **Proxy Bright Data** | Decidir con stats de uso |
-| **Baileys 7.0 estable** | Cuando el badge avise; de noche + snapshot |
+| **Sesión inexistente sin basura** (opcional) | Traccar TDI sigue pegando `session=` muerta; no urgente. Opción: descartar silencioso sin historial. Cortar en Traccar es lo correcto. |
 
-**Resueltos jul-2026:** QR · retry · Problemas · filtro antigüedad (+ AUXILIO 60 / resto 20) · stats Ecuador · alertas admin · silencio Traccar (20/30/45) · anti-ráfaga (EXCESO etc.; SOS/ON/OFF libres) · historial panel · Baileys 7 · SSH ambos VPS · backups · update.sh.
+**Resueltos jul-2026:** QR · retry · Problemas · filtro antigüedad (+ AUXILIO 60 / resto 20) · stats Ecuador · alertas admin · silencio Traccar (20/30/45) · anti-ráfaga (SOS/ON/OFF + INGRESO/SALIDA CMA/CMP libres) · historial panel (+ sessionId en limitados) · Baileys 7 rc13 · decisión no subir a rc14 · SSH ambos VPS · backups · update.sh.
 
 ---
 

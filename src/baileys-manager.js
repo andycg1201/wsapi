@@ -317,6 +317,11 @@ function shouldSkipThrottle(eventType, body) {
   return false;
 }
 
+/** Mariano Acosta (CMA/CMP): no avisar al admin por ráfaga de INGRESO/SALIDA (sí por BATERIA/EXCESO) */
+function shouldSkipBurstAdminAlert(eventType, body) {
+  return (eventType === 'INGRESO' || eventType === 'SALIDA') && isCmaOrCmpFleet(body);
+}
+
 function detectVehicleKey(body) {
   const text = String(body);
   const placa = /Placa[:\s]*([A-Z0-9\-]+)/i.exec(text);
@@ -370,17 +375,20 @@ export function evaluateEventThrottle(to, body) {
     const until = burstAlertedUntil.get(key) || 0;
     if (now >= until) {
       burstAlertedUntil.set(key, now + 10 * 60 * 1000); // no reavisar 10 min
-      const sample = String(body).slice(0, 180).replace(/\s+/g, ' ');
-      const noThrottle = shouldSkipThrottle(eventType, body);
-      sendAdminAlert(
-        `Ráfaga de notificaciones en ${os.hostname()}.\n` +
-        `Tipo: ${eventType} · Destino: ${to} · Unidad/placa: ${vehicle}\n` +
-        `${hits.length} en el último minuto` +
-        (noThrottle
-          ? ` (${eventType}${isCmaOrCmpFleet(body) ? ' CMA/CMP' : ''}: se siguen enviando todas).`
-          : ` — se limitará a 1 cada ${throttleMin} min.`) +
-        `\nMuestra: ${sample}`
-      );
+      // CMA/CMP INGRESO/SALIDA: sin aviso admin (molesto); BATERIA/EXCESO/SOS sí avisan
+      if (!shouldSkipBurstAdminAlert(eventType, body)) {
+        const sample = String(body).slice(0, 180).replace(/\s+/g, ' ');
+        const noThrottle = shouldSkipThrottle(eventType, body);
+        sendAdminAlert(
+          `Ráfaga de notificaciones en ${os.hostname()}.\n` +
+          `Tipo: ${eventType} · Destino: ${to} · Unidad/placa: ${vehicle}\n` +
+          `${hits.length} en el último minuto` +
+          (noThrottle
+            ? ` (${eventType}: se siguen enviando todas).`
+            : ` — se limitará a 1 cada ${throttleMin} min.`) +
+          `\nMuestra: ${sample}`
+        );
+      }
     }
   }
 
