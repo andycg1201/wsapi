@@ -277,6 +277,10 @@ export function getStats() {
 const recentEventHits = new Map(); // key -> number[] timestamps
 const lastEventSentAt = new Map(); // key -> timestamp último enviado
 const burstAlertedUntil = new Map(); // key -> timestamp hasta el cual no reavisar
+const recentSalidaGeo = new Map(); // `${to}|${vehicle}` -> { geofence, ts }
+const templateAlertedUntil = new Map(); // alertKey -> timestamp hasta el cual no reavisar
+const TEMPLATE_PAIR_WINDOW_MS = 45 * 1000; // dos SALIDA a geocercas distintas
+const TEMPLATE_ALERT_COOLDOWN_MS = 30 * 60 * 1000; // máx 1 aviso/30 min por caso
 
 function detectEventType(body) {
   const text = String(body);
@@ -345,6 +349,71 @@ function eventThrottleKey(to, body) {
   return `${String(to).trim()}|${detectEventType(body)}|${detectVehicleKey(body)}|${detectGeofenceKey(body)}`;
 }
 
+/** Frase del cuerpo: "ha salido de" / "ha ingresado a" (independiente del título). */
+function detectBodyMotion(body) {
+  const text = String(body);
+  if (/ha\s+salido\s+de/i.test(text)) return 'SALIDA';
+  if (/ha\s+ingresado\s+a/i.test(text)) return 'INGRESO';
+  return null;
+}
+
+function maybeAlertTemplateIssue(alertKey, text) {
+  const now = Date.now();
+  const until = templateAlertedUntil.get(alertKey) || 0;
+  if (now < until) return;
+  templateAlertedUntil.set(alertKey, now + TEMPLATE_ALERT_COOLDOWN_MS);
+  sendAdminAlert(text);
+}
+
+/**
+ * Avisa al admin si la plantilla de geocerca parece mal en Traccar.
+ * 1) Título SALIDA/INGRESO vs frase del cuerpo no coinciden.
+ * 2) Dos SALIDA a geocercas distintas en pocos segundos (caso típico: Entrada con plantilla de Salida).
+ */
+function checkTemplateIssues(to, body) {
+  const eventType = detectEventType(body);
+  const vehicle = detectVehicleKey(body);
+  const geofence = detectGeofenceKey(body);
+  const motion = detectBodyMotion(body);
+  const now = Date.now();
+  const sample = String(body).slice(0, 160).replace(/\s+/g, ' ');
+
+  if (
+    (eventType === 'SALIDA' || eventType === 'INGRESO')
+    && motion
+    && eventType !== motion
+  ) {
+    maybeAlertTemplateIssue(
+      `mismatch|${to}|${vehicle}`,
+      `Plantilla no corresponde en ${os.hostname()}.\n` +
+      `El título dice ${eventType} pero el texto dice ` +
+      `${motion === 'SALIDA' ? 'ha salido' : 'ha ingresado'}.\n` +
+      `Destino: ${to} · Unidad: ${vehicle}` +
+      (geofence !== '-' ? ` · Geocerca: ${geofence}` : '') +
+      `\nRevisa en Traccar la plantilla de Entrada/Salida.\nMuestra: ${sample}`
+    );
+  }
+
+  if (eventType === 'SALIDA' && geofence !== '-') {
+    const vk = `${String(to).trim()}|${vehicle}`;
+    const prev = recentSalidaGeo.get(vk);
+    if (prev && prev.geofence !== geofence && now - prev.ts < TEMPLATE_PAIR_WINDOW_MS) {
+      const secs = Math.max(1, Math.round((now - prev.ts) / 1000));
+      maybeAlertTemplateIssue(
+        `dualSalida|${vk}`,
+        `Posible plantilla no corresponde en ${os.hostname()}.\n` +
+        `Dos SALIDA a geocercas distintas en ${secs}s (suele ser Salida+Entrada).\n` +
+        `${prev.geofence} → ${geofence}\n` +
+        `Destino: ${to} · Unidad: ${vehicle}\n` +
+        `Si una era Entrada, corrige la plantilla en Traccar.\n` +
+        `(Nota: salida de cantón + provincia también puede verse así.)\n` +
+        `Muestra: ${sample}`
+      );
+    }
+    recentSalidaGeo.set(vk, { geofence, ts: now });
+  }
+}
+
 function pruneThrottleMaps() {
   const cutoff = Date.now() - 30 * 60 * 1000;
   for (const [k, ts] of lastEventSentAt) {
@@ -353,10 +422,16 @@ function pruneThrottleMaps() {
   for (const [k, until] of burstAlertedUntil) {
     if (until < Date.now()) burstAlertedUntil.delete(k);
   }
+  for (const [k, until] of templateAlertedUntil) {
+    if (until < Date.now()) templateAlertedUntil.delete(k);
+  }
   for (const [k, hits] of recentEventHits) {
     const fresh = hits.filter((t) => t > cutoff);
     if (fresh.length) recentEventHits.set(k, fresh);
     else recentEventHits.delete(k);
+  }
+  for (const [k, v] of recentSalidaGeo) {
+    if (!v || v.ts < cutoff) recentSalidaGeo.delete(k);
   }
 }
 
@@ -375,6 +450,7 @@ export function evaluateEventThrottle(to, body) {
   const burstWindowMs = (settings.eventBurstWindowSec ?? 60) * 1000;
 
   if (Math.random() < 0.02) pruneThrottleMaps();
+  checkTemplateIssues(to, body);
 
   const hits = (recentEventHits.get(key) || []).filter((t) => now - t < burstWindowMs);
   hits.push(now);

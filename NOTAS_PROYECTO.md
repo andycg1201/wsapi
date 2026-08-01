@@ -125,6 +125,7 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 - ≥3 en 1 min → WhatsApp al admin (máx 1 aviso/10 min por clave)
 - **Sin freno** (se envían todas): **AUXILIO/SOS**, **ENCENDIDO/ON**, **APAGADO/OFF**, e **INGRESO/SALIDA** de flota **CMA/CMP** (Mariano Acosta; ej. 10 CMA, 08 CMP)
 - **Aviso admin por ráfaga:** normal (BATERIA/EXCESO/SOS/etc.). **Excepción:** INGRESO/SALIDA de CMA/CMP **no** avisan al admin (siguen enviándose a clientes)
+- **Plantilla no corresponde:** aviso admin si título SALIDA/INGRESO no coincide con “ha salido/ingresado”, o si llegan **dos SALIDA** a geocercas distintas en menos de 45 s (caso Entrada con plantilla de Salida). Máx 1 aviso/30 min. Nota: salida cantón+provincia puede parecerse.
 
 ### Silencio de tráfico / Traccar caído (`74a971d` / `ec3f56d`)
 - Por VPS: si no hay ningún envío real (hora Ecuador)
