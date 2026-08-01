@@ -92,7 +92,7 @@ async function handleNotify(request, reply) {
     return reply.send({ success: true, discarded: true, reason });
   }
 
-  // Anti-ráfaga: máx 1 cada 3 min del mismo evento (destino+tipo+placa).
+  // Anti-ráfaga: máx 1 cada 3 min del mismo evento (destino+tipo+placa+geocerca).
   // Sin freno: AUXILIO/ENCENDIDO/APAGADO, e INGRESO/SALIDA de flota CMA/CMP.
   const throttle = evaluateEventThrottle(to, body);
   if (!throttle.allow) {

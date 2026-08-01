@@ -119,9 +119,9 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 - Normal: **20 min** · **AUXILIO: 60 min**
 - Descarte → HTTP 200 (Traccar no reintenta)
 
-### Anti-ráfaga (`ea88d23`)
-- Clave: destino + tipo (EXCESO/INGRESO/SALIDA/…) + placa/unidad
-- Máx **1 envío cada 3 min** del mismo evento
+### Anti-ráfaga (`ea88d23` + geocerca)
+- Clave: destino + tipo + placa/unidad + **geocerca** (ej. Santo Domingo ≠ Pichincha; cantón y provincia no se frenan entre sí)
+- Máx **1 envío cada 3 min** del mismo evento (misma geocerca)
 - ≥3 en 1 min → WhatsApp al admin (máx 1 aviso/10 min por clave)
 - **Sin freno** (se envían todas): **AUXILIO/SOS**, **ENCENDIDO/ON**, **APAGADO/OFF**, e **INGRESO/SALIDA** de flota **CMA/CMP** (Mariano Acosta; ej. 10 CMA, 08 CMP)
 - **Aviso admin por ráfaga:** normal (BATERIA/EXCESO/SOS/etc.). **Excepción:** INGRESO/SALIDA de CMA/CMP **no** avisan al admin (siguen enviándose a clientes)

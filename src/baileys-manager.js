@@ -271,7 +271,7 @@ export function getStats() {
 }
 
 // ---------------------------------------------------------------------------
-// Anti-ráfaga: máx 1 envío cada N min del mismo evento (destino+tipo+placa).
+// Anti-ráfaga: máx 1 envío cada N min del mismo evento (destino+tipo+placa+geocerca).
 // AUXILIO nunca se frena; solo avisa al admin si llega en ráfaga.
 // ---------------------------------------------------------------------------
 const recentEventHits = new Map(); // key -> number[] timestamps
@@ -333,8 +333,16 @@ function detectVehicleKey(body) {
   return 's/n';
 }
 
+/** Geocerca del texto (ej. "ha salido de Santo Domingo", "ha ingresado a Pichincha"). */
+function detectGeofenceKey(body) {
+  const text = String(body);
+  const m = /ha\s+(?:salido\s+de|ingresado\s+a)\s+(.+?)\s+por\s+la\s+siguiente/i.exec(text);
+  if (m?.[1]) return m[1].trim().toUpperCase().replace(/\s+/g, ' ').slice(0, 60);
+  return '-';
+}
+
 function eventThrottleKey(to, body) {
-  return `${String(to).trim()}|${detectEventType(body)}|${detectVehicleKey(body)}`;
+  return `${String(to).trim()}|${detectEventType(body)}|${detectVehicleKey(body)}|${detectGeofenceKey(body)}`;
 }
 
 function pruneThrottleMaps() {
@@ -359,6 +367,7 @@ function pruneThrottleMaps() {
 export function evaluateEventThrottle(to, body) {
   const eventType = detectEventType(body);
   const vehicle = detectVehicleKey(body);
+  const geofence = detectGeofenceKey(body);
   const key = eventThrottleKey(to, body);
   const now = Date.now();
   const throttleMin = settings.eventThrottleMin ?? 3;
@@ -379,9 +388,10 @@ export function evaluateEventThrottle(to, body) {
       if (!shouldSkipBurstAdminAlert(eventType, body)) {
         const sample = String(body).slice(0, 180).replace(/\s+/g, ' ');
         const noThrottle = shouldSkipThrottle(eventType, body);
+        const geoPart = geofence !== '-' ? ` · Geocerca: ${geofence}` : '';
         sendAdminAlert(
           `Ráfaga de notificaciones en ${os.hostname()}.\n` +
-          `Tipo: ${eventType} · Destino: ${to} · Unidad/placa: ${vehicle}\n` +
+          `Tipo: ${eventType} · Destino: ${to} · Unidad/placa: ${vehicle}${geoPart}\n` +
           `${hits.length} en el último minuto` +
           (noThrottle
             ? ` (${eventType}: se siguen enviando todas).`
@@ -402,11 +412,12 @@ export function evaluateEventThrottle(to, body) {
   const throttleMs = throttleMin * 60 * 1000;
   if (lastSent && now - lastSent < throttleMs) {
     const waitMin = Math.ceil((throttleMs - (now - lastSent)) / 60000);
+    const geoLabel = geofence !== '-' ? ` / ${geofence}` : '';
     return {
       allow: false,
       throttled: true,
       eventType,
-      reason: `Mismo ${eventType} (${vehicle}) hace menos de ${throttleMin} min — reintentar en ~${waitMin} min`,
+      reason: `Mismo ${eventType} (${vehicle}${geoLabel}) hace menos de ${throttleMin} min — reintentar en ~${waitMin} min`,
     };
   }
 
