@@ -1,6 +1,6 @@
 # Notas del proyecto WSAPI - Donde quedamos
 
-**Fecha:** 28 de julio de 2026 (actualizado)
+**Fecha:** 1 de agosto de 2026 (actualizado)
 
 ---
 
@@ -57,6 +57,9 @@ El badge/aviso de “hay versión nueva” puede seguir apareciendo; **ignorar**
 | `debe684` | **ENCENDIDO/APAGADO sin throttle** (igual que AUXILIO/SOS) |
 | `3f65c13` | INGRESO/SALIDA flota **CMA/CMP** sin throttle |
 | `15743d1` | Historial limitados/descartados con **sessionId** + tipo BATERIA |
+| `f1f7506` | CMA/CMP: **sin aviso admin** por ráfaga de INGRESO/SALIDA (sí BATERIA/EXCESO) |
+| `75acd29` | Anti-ráfaga: clave incluye **geocerca** (cantón ≠ provincia) |
+| `550663e` | Aviso admin **Plantilla no corresponde** (Entrada/Salida mal en Traccar) |
 
 ### Panel `/pair`
 
@@ -119,13 +122,19 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 - Normal: **20 min** · **AUXILIO: 60 min**
 - Descarte → HTTP 200 (Traccar no reintenta)
 
-### Anti-ráfaga (`ea88d23` + geocerca)
+### Anti-ráfaga (`ea88d23` + geocerca `75acd29`)
 - Clave: destino + tipo + placa/unidad + **geocerca** (ej. Santo Domingo ≠ Pichincha; cantón y provincia no se frenan entre sí)
 - Máx **1 envío cada 3 min** del mismo evento (misma geocerca)
 - ≥3 en 1 min → WhatsApp al admin (máx 1 aviso/10 min por clave)
 - **Sin freno** (se envían todas): **AUXILIO/SOS**, **ENCENDIDO/ON**, **APAGADO/OFF**, e **INGRESO/SALIDA** de flota **CMA/CMP** (Mariano Acosta; ej. 10 CMA, 08 CMP)
 - **Aviso admin por ráfaga:** normal (BATERIA/EXCESO/SOS/etc.). **Excepción:** INGRESO/SALIDA de CMA/CMP **no** avisan al admin (siguen enviándose a clientes)
-- **Plantilla no corresponde:** aviso admin si título SALIDA/INGRESO no coincide con “ha salido/ingresado”, o si llegan **dos SALIDA** a geocercas distintas en menos de 45 s (caso Entrada con plantilla de Salida). Máx 1 aviso/30 min. Nota: salida cantón+provincia puede parecerse.
+
+### Plantilla no corresponde (`550663e`)
+- WSAPI **no ve** el tipo real del evento en Traccar; solo el texto HTTP.
+- Aviso admin **"Plantilla no corresponde"** si el título dice SALIDA/INGRESO y el cuerpo dice lo contrario (`ha salido` / `ha ingresado`).
+- Aviso **"Posible plantilla no corresponde"** si llegan **dos SALIDA** a geocercas distintas en **menos de 45 s** (caso típico: Entrada con plantilla de Salida, como CAH0132 el 1-ago).
+- Máx **1 aviso / 30 min** por caso. Nota en el mensaje: salida cantón + provincia también puede parecerse.
+- **Lección 1-ago:** en Eventos se veía Entrada (Pichincha) pero el SMS decía SALIDA; había plantilla mal en Traccar (corregida). Eventos ≠ notificaciones HTTP; además a veces Traccar **duplica** el mismo envío.
 
 ### Silencio de tráfico / Traccar caído (`74a971d` / `ec3f56d`)
 - Por VPS: si no hay ningún envío real (hora Ecuador)
@@ -134,10 +143,10 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 - Tras `pm2 restart`: gracia = umbral (evita falsa alarma)
 - Las alertas al admin **no** reinician el contador de silencio
 
-### Historial del panel (`3c32fd2`)
+### Historial del panel (`3c32fd2` / `15743d1`)
 - Clic en pastillas → lista reciente
-- Memoria: máx **300** entradas · TTL **12 h** · ~poca RAM
-- No disco · se vacía al reiniciar PM2
+- Enviados / fallidos / limitados / descartados: fecha, tipo (incl. BATERIA), destino, **sessionId**
+- Memoria: máx **300** entradas · TTL **12 h** · se vacía al reiniciar PM2
 - API: `GET /api/message-history?kind=sent|failed|discarded_old|throttled`
 
 ### Stats del día
@@ -179,9 +188,9 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 | **Panel único 2 VPS** | Una vista con ambos servidores |
 | **IDs consecutivos** | `numero_1, 2, 3…` al crear sesión |
 | **Proxy Bright Data** | Decidir con stats de uso |
-| **Sesión inexistente sin basura** (opcional) | Traccar TDI sigue pegando `session=` muerta; no urgente. Opción: descartar silencioso sin historial. Cortar en Traccar es lo correcto. |
+| **Sesión inexistente sin basura** (opcional) | Traccar TDI (`89.117.17.39`) pegaba a VPS1 con `session=numero_1784301738904` ya borrada → clientes **no** reciben (error sesión). Opción: descartar silencioso. Cortar en Traccar es lo correcto. |
 
-**Resueltos jul-2026:** QR · retry · Problemas · filtro antigüedad (+ AUXILIO 60 / resto 20) · stats Ecuador · alertas admin · silencio Traccar (20/30/45) · anti-ráfaga (SOS/ON/OFF + INGRESO/SALIDA CMA/CMP libres) · historial panel (+ sessionId en limitados) · Baileys 7 rc13 · decisión no subir a rc14 · SSH ambos VPS · backups · update.sh.
+**Resueltos jul–ago 2026:** QR · retry · Problemas · filtro antigüedad · stats Ecuador · alertas admin · silencio Traccar · anti-ráfaga (SOS/ON/OFF + CMA/CMP INGRESO/SALIDA libres; sin aviso admin en esas ráfagas) · geocerca en clave throttle · plantilla no corresponde · historial + sessionId · Baileys 7 rc13 (no rc14) · SSH ambos VPS · backups · update.sh.
 
 ---
 
@@ -191,7 +200,7 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 pm2 logs wsapi --lines 50
 ```
 
-Buscar: `Conexión cerrada`, `Health check`, `Evento descartado`, `throttle`, `Sin envíos`, `QR generado`, `Ajustes:`.
+Buscar: `Conexión cerrada`, `Health check`, `Evento descartado`, `throttle`, `Plantilla no corresponde`, `Sin envíos`, `QR generado`, `Ajustes:`.
 
 Sesión roja → **Reconectar** en `/pair` (sin QR).
 
