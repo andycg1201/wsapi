@@ -131,6 +131,7 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 
 ### Plantilla no corresponde (`550663e`)
 - WSAPI **no ve** el tipo real del evento en Traccar; solo el texto HTTP.
+- Tipo INGRESO/SALIDA se lee solo de la **primera línea** (no del cuerpo): geocercas tipo **"INGRESO AL PARQUE"** no generan falso positivo.
 - Aviso admin **"Plantilla no corresponde"** si el título dice SALIDA/INGRESO y el cuerpo dice lo contrario (`ha salido` / `ha ingresado`).
 - Aviso **"Posible plantilla no corresponde"** si llegan **dos SALIDA** a geocercas distintas en **menos de 45 s** (caso típico: Entrada con plantilla de Salida, como CAH0132 el 1-ago).
 - Máx **1 aviso / 30 min** por caso. Nota en el mensaje: salida cantón + provincia también puede parecerse.

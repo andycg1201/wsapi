@@ -298,8 +298,9 @@ function detectEventType(body) {
     || /APAGADO|IGNITION\s*OFF|MOTOR\s*OFF/.test(head)
   ) return 'APAGADO';
   if (/EXCESO/.test(head)) return 'EXCESO';
-  if (/INGRESO/.test(head)) return 'INGRESO';
-  if (/SALIDA/.test(head)) return 'SALIDA';
+  // Solo primera línea: geocercas como "INGRESO AL PARQUE" no deben marcar tipo INGRESO
+  if (firstLine === 'INGRESO' || firstLine.startsWith('INGRESO ')) return 'INGRESO';
+  if (firstLine === 'SALIDA' || firstLine.startsWith('SALIDA ')) return 'SALIDA';
   if (/BATER[IÍ]A|BATTERY/.test(head) || firstLine === 'BATERIA' || firstLine === 'BATERÍA') return 'BATERIA';
   return 'OTRO';
 }
