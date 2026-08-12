@@ -134,6 +134,7 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 - Tipo INGRESO/SALIDA se lee solo de la **primera línea** (no del cuerpo): geocercas tipo **"INGRESO AL PARQUE"** no generan falso positivo.
 - Aviso admin **"Plantilla no corresponde"** si el título dice SALIDA/INGRESO y el cuerpo dice lo contrario (`ha salido` / `ha ingresado`).
 - Aviso **"Posible plantilla no corresponde"** si llegan **dos SALIDA** a geocercas distintas en **menos de 45 s** (caso típico: Entrada con plantilla de Salida, como CAH0132 el 1-ago).
+- **Excepción CMA/CMP** (Mariano Acosta / Campesinos): **no** se envía el aviso “Posible…”. El de título vs texto (“Plantilla no corresponde”) sí aplica.
 - Máx **1 aviso / 30 min** por caso. Nota en el mensaje: salida cantón + provincia también puede parecerse.
 - **Lección 1-ago:** en Eventos se veía Entrada (Pichincha) pero el SMS decía SALIDA; había plantilla mal en Traccar (corregida). Eventos ≠ notificaciones HTTP; además a veces Traccar **duplica** el mismo envío.
 

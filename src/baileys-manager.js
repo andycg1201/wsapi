@@ -398,7 +398,13 @@ function checkTemplateIssues(to, body) {
   if (eventType === 'SALIDA' && geofence !== '-') {
     const vk = `${String(to).trim()}|${vehicle}`;
     const prev = recentSalidaGeo.get(vk);
-    if (prev && prev.geofence !== geofence && now - prev.ts < TEMPLATE_PAIR_WINDOW_MS) {
+    // CMA/CMP (Mariano Acosta / Campesinos): no avisar "Posible plantilla…"
+    if (
+      !isCmaOrCmpFleet(body)
+      && prev
+      && prev.geofence !== geofence
+      && now - prev.ts < TEMPLATE_PAIR_WINDOW_MS
+    ) {
       const secs = Math.max(1, Math.round((now - prev.ts) / 1000));
       maybeAlertTemplateIssue(
         `dualSalida|${vk}`,
