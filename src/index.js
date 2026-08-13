@@ -292,7 +292,6 @@ const pairHandler = async (request, reply) => {
   <h3 style="margin-top:0;">Sesiones WhatsApp</h3>
   <div id="sessions"></div>
   <h3 style="margin-top:1.5rem;">Telegram</h3>
-  <p style="color:#6b7280;font-size:0.9rem;margin:0 0 0.75rem 0;">Bots independientes (BotFather). Destino = <code>chat_id</code> del usuario o grupo. No usa números de WhatsApp.</p>
   <div style="margin-bottom:0.75rem;">
     <button type="button" id="btnAddTg" class="btn-add-tg">+ Bot Telegram</button>
     <span id="addTgMsg"></span>
