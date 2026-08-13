@@ -1,6 +1,6 @@
 # Notas del proyecto WSAPI - Donde quedamos
 
-**Fecha:** 1 de agosto de 2026 (actualizado)
+**Fecha:** 13 de agosto de 2026 (actualizado)
 
 ---
 
@@ -177,6 +177,14 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 - **Dinámica:** round-robin (tráfico general sin `&session=`)
 - **Exclusiva:** solo con `&session=` (cliente que debe recibir siempre del mismo número)
 - Dejar la mayoría dinámicas; exclusiva solo cuando haga falta
+
+### Telegram (bots, independiente de WhatsApp)
+- Panel `/pair` → sección **Telegram** (no toca sesiones Baileys)
+- Archivo: `config/telegram.json` (tokens; **no versionar**)
+- URL Traccar: `http://IP:3000/messages/telegram?to=%NUMBER%&body=%MESSAGE%&session=telegram_XXXX`
+- `to` = `chat_id` de Telegram (usuario o grupo, el grupo puede ser negativo). El bot debe estar en el grupo.
+- Mismos filtros de antigüedad / ráfaga que WhatsApp, en un handler aparte (`/messages/chat` no cambia)
+- Recursos: solo HTTP puntual; no hay WebSocket ni QR
 
 ---
 

@@ -31,6 +31,12 @@ import {
   getVersionInfo,
   getMessageHistory,
 } from './baileys-manager.js';
+import {
+  getTelegramSessionsStatus,
+  addTelegramBot,
+  removeTelegramBot,
+  sendTelegramMessage,
+} from './telegram-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fastify = Fastify({ logger: true });
@@ -115,6 +121,53 @@ async function handleNotify(request, reply) {
   }
 }
 
+/**
+ * Notificaciones Telegram (bots). Independiente de WhatsApp/Baileys.
+ * GET/POST: to = chat_id, body = texto, session = telegram_xxx
+ */
+async function handleTelegramNotify(request, reply) {
+  const to = request.query?.to || request.body?.to;
+  const body = request.query?.body || request.body?.body || request.body?.message || request.body?.text;
+  const session = request.query?.session || request.body?.session;
+
+  request.log.info({ to, bodyLength: body?.length, session }, 'Notificación Telegram recibida');
+
+  if (!to || !body) {
+    return reply.status(400).send({
+      error: [{ to: to ? 'ok' : 'is required' }, { body: body ? 'ok' : 'is required' }],
+    });
+  }
+
+  const settings = getSettings();
+  const isAuxilio = /AUXILIO/i.test(body);
+  const maxAgeMin = isAuxilio
+    ? (settings.auxilioMaxEventAgeMin ?? 60)
+    : (settings.maxEventAgeMin ?? 20);
+  const ageMs = getEventAgeMs(body);
+  if (ageMs !== null && ageMs > maxAgeMin * 60 * 1000) {
+    const reason = `Evento de hace ${Math.round(ageMs / 60000)} min (umbral ${maxAgeMin} min)`;
+    recordDiscardedOld(to, body, reason, session || 'telegram');
+    request.log.warn({ to, session, ageMin: Math.round(ageMs / 60000) }, 'Telegram descartado por antigüedad');
+    return reply.send({ success: true, discarded: true, reason });
+  }
+
+  const throttle = evaluateEventThrottle(to, body);
+  if (!throttle.allow) {
+    recordThrottled(to, body, throttle.reason, session || 'telegram');
+    request.log.warn({ to, session, reason: throttle.reason }, 'Telegram descartado por throttle');
+    return reply.send({ success: true, discarded: true, throttled: true, reason: throttle.reason });
+  }
+
+  try {
+    const result = await sendTelegramMessage(to, body, session || undefined);
+    request.log.info({ to, sessionId: result.sessionId }, 'Telegram enviado OK');
+    return reply.send({ success: true, sessionId: result.sessionId });
+  } catch (err) {
+    request.log.error({ err, to }, 'Error enviando Telegram');
+    return reply.status(502).send({ error: err.message });
+  }
+}
+
 // Favicon - evita 404 en la consola del navegador
 fastify.get('/favicon.ico', async (request, reply) => {
   return reply.status(204).send();
@@ -145,6 +198,7 @@ fastify.get('/test-send', async (request, reply) => {
 // API
 fastify.all('/messages/chat', handleNotify);
 fastify.all('/notify', handleNotify);
+fastify.all('/messages/telegram', handleTelegramNotify);
 fastify.get('/health', async () => ({
   status: 'ok',
   timestamp: new Date().toISOString(),
@@ -194,6 +248,9 @@ const pairHandler = async (request, reply) => {
     .badge { font-size: 0.75em; padding: 0.15rem 0.4rem; border-radius: 4px; background: #e5e7eb; color: #6b7280; }
     .btn-add { width:28px;height:28px;padding:0;font-size:1.2rem;line-height:1;background:#25D366;color:white;border:none;border-radius:50%;cursor:pointer;display:inline-flex;align-items:center;justify-content:center; }
     .btn-add:hover { background:#20bd5a; }
+    .btn-add-tg { background:#229ED9; color:white; border:none; border-radius:6px; padding:0.3rem 0.7rem; cursor:pointer; font-size:0.85rem; }
+    .btn-add-tg:hover { background:#1b8fc7; }
+    .tg-url { font-family:monospace; font-size:0.75em; color:#4b5563; word-break:break-all; }
     .msg { margin-left: 0.25rem; padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.85em; }
     .msg.err { background: #fee2e2; color: #b91c1c; }
     .msg.ok { background: #d1fae5; color: #047857; }
@@ -232,8 +289,15 @@ const pairHandler = async (request, reply) => {
     <span id="addMsg"></span>
   </div>
   <div id="summaryBar" class="summary-bar"></div>
-  <h3 style="margin-top:0;">Sesiones</h3>
+  <h3 style="margin-top:0;">Sesiones WhatsApp</h3>
   <div id="sessions"></div>
+  <h3 style="margin-top:1.5rem;">Telegram</h3>
+  <p style="color:#6b7280;font-size:0.9rem;margin:0 0 0.75rem 0;">Bots independientes (BotFather). Destino = <code>chat_id</code> del usuario o grupo. No usa números de WhatsApp.</p>
+  <div style="margin-bottom:0.75rem;">
+    <button type="button" id="btnAddTg" class="btn-add-tg">+ Bot Telegram</button>
+    <span id="addTgMsg"></span>
+  </div>
+  <div id="tgSessions"></div>
   <div id="qr" style="display:none;">
     <h3>Escanear con WhatsApp</h3>
     <p id="qrStatus">Generando código QR...</p>
@@ -285,6 +349,37 @@ const pairHandler = async (request, reply) => {
       </div>
       <div style="padding:1rem; border-top:1px solid #e5e7eb;">
         <button onclick="document.getElementById('historyModal').classList.remove('show')">Cerrar</button>
+      </div>
+    </div>
+  </div>
+  <div id="tgAddModal" class="modal">
+    <div class="modal-inner" style="max-width:420px;">
+      <h3>Nuevo bot Telegram</h3>
+      <div class="modal-body">
+        <p style="margin:0 0 0.6rem 0;font-size:0.9rem;color:#6b7280;">Crea el bot en Telegram con @BotFather y pega el token. El token se guarda solo en este servidor.</p>
+        <label style="display:block;font-size:0.85rem;margin-bottom:0.2rem;">Nombre</label>
+        <input id="tgLabel" placeholder="Ej. Alertas Halconsat" style="width:100%;padding:0.5rem;margin-bottom:0.6rem;border:1px solid #ccc;border-radius:4px;" />
+        <label style="display:block;font-size:0.85rem;margin-bottom:0.2rem;">Token (BotFather)</label>
+        <input id="tgToken" placeholder="123456789:AAE..." style="width:100%;padding:0.5rem;margin-bottom:0.5rem;border:1px solid #ccc;border-radius:4px;" />
+        <span id="tgAddErr"></span>
+      </div>
+      <div style="padding:1rem; border-top:1px solid #e5e7eb; display:flex; gap:0.5rem;">
+        <button onclick="document.getElementById('tgAddModal').classList.remove('show')">Cancelar</button>
+        <button id="tgAddSave" class="btn-add-tg">Guardar</button>
+      </div>
+    </div>
+  </div>
+  <div id="tgTestModal" class="modal">
+    <div class="modal-inner" style="max-width:420px;">
+      <h3>Probar envío Telegram</h3>
+      <div class="modal-body">
+        <p style="margin:0 0 0.5rem 0;font-size:0.9rem;color:#6b7280;">Escribe un mensaje a tu bot y luego el <code>chat_id</code> (el tuyo o de un grupo). En un grupo, añade el bot primero.</p>
+        <input id="tgTestChat" placeholder="chat_id (ej. 123456789 o -100...)" style="width:100%;padding:0.5rem;margin-bottom:0.5rem;border:1px solid #ccc;border-radius:4px;" />
+        <span id="tgTestErr"></span>
+      </div>
+      <div style="padding:1rem; border-top:1px solid #e5e7eb; display:flex; gap:0.5rem;">
+        <button onclick="document.getElementById('tgTestModal').classList.remove('show')">Cancelar</button>
+        <button id="tgTestSend" class="btn-add-tg">Enviar prueba</button>
       </div>
     </div>
   </div>
@@ -431,8 +526,10 @@ const pairHandler = async (request, reply) => {
       });
     }
     var deleteSessionId = null;
-    function showDeleteModal(id) {
+    var deleteKind = 'wa';
+    function showDeleteModal(id, kind) {
       deleteSessionId = id;
+      deleteKind = kind || 'wa';
       document.getElementById('deletePin').value = '';
       document.getElementById('deleteMsg').innerHTML = '';
       document.getElementById('deleteModal').classList.add('show');
@@ -440,6 +537,7 @@ const pairHandler = async (request, reply) => {
     }
     function cancelDelete() {
       deleteSessionId = null;
+      deleteKind = 'wa';
       document.getElementById('deleteModal').classList.remove('show');
     }
     document.getElementById('confirmDeleteBtn').onclick = function() {
@@ -447,7 +545,10 @@ const pairHandler = async (request, reply) => {
       var msgDiv = document.getElementById('deleteMsg');
       if (!deleteSessionId) return;
       msgDiv.innerHTML = '';
-      fetch('/api/sessions/' + encodeURIComponent(deleteSessionId), {
+      var url = deleteKind === 'tg'
+        ? '/api/telegram/' + encodeURIComponent(deleteSessionId)
+        : '/api/sessions/' + encodeURIComponent(deleteSessionId);
+      fetch(url, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin: pin })
@@ -458,6 +559,7 @@ const pairHandler = async (request, reply) => {
         }
         cancelDelete();
         loadSessions();
+        loadTelegram();
       }).catch(function() {
         msgDiv.innerHTML = '<span class="msg err">Error</span>';
       });
@@ -621,10 +723,118 @@ const pairHandler = async (request, reply) => {
       pollQr();
       var t = setInterval(pollQr, 3000);
     }
+    var tgTestSessionId = null;
+    function renderTelegram(list) {
+      var div = document.getElementById('tgSessions');
+      if (!div) return;
+      if (!list || list.length === 0) {
+        div.innerHTML = '<p style="color:#9ca3af;font-size:0.9rem;">Ningún bot aún. Pulsa “+ Bot Telegram”.</p>';
+        return;
+      }
+      var origin = window.location.origin;
+      var html = '';
+      for (var i = 0; i < list.length; i++) {
+        var s = list[i];
+        var st = s.status === 'online' ? 'online' : 'offline';
+        var pill = '<span class="status-pill ' + st + '">' + (st === 'online' ? 'Bot OK' : 'Token inválido') + '</span>';
+        var display = escapeHtml(s.label || s.id);
+        if (s.username) display += ' <span style="color:#6b7280;font-weight:normal">' + escapeHtml(s.username) + '</span>';
+        if (s.stats) display += ' <span style="font-size:0.78em;color:#4b5563;background:#f3f4f6;border-radius:4px;padding:0.1rem 0.35rem;">' + (s.stats.sent || 0) + ' hoy' + (s.stats.failed ? ' · ' + s.stats.failed + ' err' : '') + '</span>';
+        var url = origin + '/messages/telegram?to=%NUMBER%&body=%MESSAGE%&session=' + encodeURIComponent(s.id);
+        html += '<div class="session ' + (st === 'online' ? 'connected' : 'pending') + '">' +
+          '<span class="session-content">' + pill + ' ' + display +
+          ' <button class="btn-copy tg-copy" data-url="' + escapeHtml(url) + '">Copiar URL Traccar</button>' +
+          ' <button class="btn-add-tg tg-test" data-id="' + escapeHtml(s.id) + '">Probar</button>' +
+          '<div class="tg-url" style="margin-top:0.35rem;">' + escapeHtml(s.id) + ' · token ' + escapeHtml(s.tokenMasked || '') + '</div>' +
+          '</span><button class="btn-delete tg-del" data-id="' + escapeHtml(s.id) + '" title="Eliminar">🗑</button></div>';
+      }
+      div.innerHTML = html;
+      div.querySelectorAll('.tg-copy').forEach(function(b) {
+        b.onclick = function() {
+          navigator.clipboard.writeText(b.getAttribute('data-url')).then(function() {
+            b.textContent = '¡Copiada!';
+            setTimeout(function() { b.textContent = 'Copiar URL Traccar'; }, 1500);
+          });
+        };
+      });
+      div.querySelectorAll('.tg-test').forEach(function(b) {
+        b.onclick = function() {
+          tgTestSessionId = b.getAttribute('data-id');
+          document.getElementById('tgTestChat').value = '';
+          document.getElementById('tgTestErr').innerHTML = '';
+          document.getElementById('tgTestModal').classList.add('show');
+        };
+      });
+      div.querySelectorAll('.tg-del').forEach(function(b) {
+        b.onclick = function() { showDeleteModal(b.getAttribute('data-id'), 'tg'); };
+      });
+    }
+    function loadTelegram() {
+      fetch('/api/telegram').then(function(r) { return r.json(); }).then(function(data) {
+        renderTelegram(data.sessions || []);
+      }).catch(function() {});
+    }
+    document.getElementById('btnAddTg').onclick = function() {
+      document.getElementById('tgLabel').value = '';
+      document.getElementById('tgToken').value = '';
+      document.getElementById('tgAddErr').innerHTML = '';
+      document.getElementById('tgAddModal').classList.add('show');
+    };
+    document.getElementById('tgAddSave').onclick = function() {
+      var err = document.getElementById('tgAddErr');
+      err.innerHTML = '';
+      var btn = document.getElementById('tgAddSave');
+      btn.disabled = true;
+      fetch('/api/telegram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: document.getElementById('tgLabel').value,
+          token: document.getElementById('tgToken').value
+        })
+      }).then(function(r) { return r.json().catch(function() { return {}; }); }).then(function(data) {
+        btn.disabled = false;
+        if (data.error) {
+          err.innerHTML = '<span class="msg err">' + escapeHtml(data.error) + '</span>';
+          return;
+        }
+        document.getElementById('tgAddModal').classList.remove('show');
+        loadTelegram();
+      }).catch(function() {
+        btn.disabled = false;
+        err.innerHTML = '<span class="msg err">Error</span>';
+      });
+    };
+    document.getElementById('tgTestSend').onclick = function() {
+      var err = document.getElementById('tgTestErr');
+      err.innerHTML = '';
+      if (!tgTestSessionId) return;
+      var chat = document.getElementById('tgTestChat').value.trim();
+      if (!chat) {
+        err.innerHTML = '<span class="msg err">Falta chat_id</span>';
+        return;
+      }
+      fetch('/api/telegram/' + encodeURIComponent(tgTestSessionId) + '/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: chat })
+      }).then(function(r) { return r.json().catch(function() { return {}; }); }).then(function(data) {
+        if (data.error) {
+          err.innerHTML = '<span class="msg err">' + escapeHtml(data.error) + '</span>';
+          return;
+        }
+        err.innerHTML = '<span class="msg ok">Enviado. Revisa Telegram.</span>';
+        loadTelegram();
+      }).catch(function() {
+        err.innerHTML = '<span class="msg err">Error</span>';
+      });
+    };
     loadSessions();
+    loadTelegram();
     var refreshId = setInterval(function() {
       if (pollErrors >= 3) { clearInterval(refreshId); return; }
       loadSessions();
+      loadTelegram();
     }, 5000);
   </script>
 </body>
@@ -712,6 +922,39 @@ fastify.post('/api/sessions', async (request, reply) => {
   }
 });
 
+// --- Telegram (bots; no toca Baileys) ---
+fastify.get('/api/telegram', async () => ({ sessions: await getTelegramSessionsStatus() }));
+fastify.post('/api/telegram', async (request, reply) => {
+  try {
+    const session = await addTelegramBot(request.body || {});
+    return reply.send({ success: true, session });
+  } catch (err) {
+    return reply.status(400).send({ error: err.message });
+  }
+});
+fastify.delete('/api/telegram/:id', async (request, reply) => {
+  try {
+    const pin = request.body?.pin ?? request.query?.pin ?? '';
+    if (!validateDeletePin(pin)) {
+      return reply.status(403).send({ error: 'PIN incorrecto' });
+    }
+    removeTelegramBot(request.params.id);
+    return reply.send({ success: true });
+  } catch (err) {
+    return reply.status(400).send({ error: err.message });
+  }
+});
+fastify.post('/api/telegram/:id/test', async (request, reply) => {
+  try {
+    const to = request.body?.to || request.query?.to;
+    if (!to) return reply.status(400).send({ error: 'Falta chat_id (to)' });
+    const result = await sendTelegramMessage(to, 'Prueba WSAPI Telegram — si ves esto, el bot está bien.', request.params.id);
+    return reply.send({ success: true, sessionId: result.sessionId });
+  } catch (err) {
+    return reply.status(400).send({ error: err.message });
+  }
+});
+
 // Iniciar
 try {
   await fastify.listen({ port: PORT, host: '0.0.0.0' });
@@ -722,6 +965,7 @@ URL para Traccar:
   http://TU_IP:${PORT}/messages/chat?to=%NUMBER%&body=%MESSAGE%
 
 Panel para vincular números: http://TU_IP:${PORT}/pair
+Telegram (bots): http://TU_IP:${PORT}/messages/telegram?to=%NUMBER%&body=%MESSAGE%&session=telegram_XXXX
 `);
 } catch (err) {
   fastify.log.error(err);
