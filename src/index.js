@@ -867,8 +867,7 @@ const pairHandler = async (request, reply) => {
           return;
         }
         var chats = data.chats || [];
-        var html = '<p style="margin:0 0 0.5rem 0;font-size:0.85rem;color:#6b7280;">Grupos o chats donde el bot ya está. El grupo se crea en Telegram; aquí solo lo administras.</p>';
-        html += '<div style="display:flex;gap:0.4rem;margin-bottom:0.75rem;">' +
+        var html = '<div style="display:flex;gap:0.4rem;margin-bottom:0.75rem;">' +
           '<input id="tgNewChatId" placeholder="chat_id del grupo o usuario" style="flex:1;padding:0.45rem;border:1px solid #ccc;border-radius:4px;" />' +
           '<button id="tgAddChatBtn" class="btn-add-tg">Añadir</button></div>' +
           '<div id="tgChatAddErr"></div>';
