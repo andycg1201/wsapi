@@ -60,6 +60,10 @@ El badge/aviso de “hay versión nueva” puede seguir apareciendo; **ignorar**
 | `f1f7506` | CMA/CMP: **sin aviso admin** por ráfaga de INGRESO/SALIDA (sí BATERIA/EXCESO) |
 | `75acd29` | Anti-ráfaga: clave incluye **geocerca** (cantón ≠ provincia) |
 | `550663e` | Aviso admin **Plantilla no corresponde** (Entrada/Salida mal en Traccar) |
+| `7e15443` | Tipo INGRESO/SALIDA solo en **primera línea** (geocerca “INGRESO AL PARQUE”) |
+| `cbfb15e` | CMA/CMP: **sin** aviso “Posible plantilla no corresponde” |
+| `b7dfe6a` | **Telegram:** bots en `/pair`, endpoint propio (WhatsApp intacto) |
+| `d3cb2c2` | Panel: quitar texto de ayuda de Telegram |
 
 ### Panel `/pair`
 
@@ -74,12 +78,16 @@ El badge/aviso de “hay versión nueva” puede seguir apareciendo; **ignorar**
 - Auto-refresh 5 s · pastillas de resumen
 - **Clic en pastillas** enviados / fallidos / descartados / limitados → modal con detalle (muestra del mensaje)
 - Botón rojo **"Problemas"** · badge Baileys nueva versión · Exclusiva/Dinámica · contador por sesión
+- Sección **Telegram** (abajo): + Bot · Probar · Copiar URL · eliminar (mismo PIN). Sin texto de ayuda extra.
 
 ### URLs Traccar
 
-**VPS 1:** `http://46.225.142.215:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%&priority=10`  
-**VPS 2:** `http://46.225.92.152:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%&priority=10`  
-Por sesión: `&session=numero_XXXX` — IDs en `/api/sessions`
+**WhatsApp VPS 1:** `http://46.225.142.215:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%&priority=10`  
+**WhatsApp VPS 2:** `http://46.225.92.152:3000/messages/chat?to=%NUMBER%&body=%MESSAGE%&priority=10`  
+Por sesión WA: `&session=numero_XXXX` — IDs en `/api/sessions`
+
+**Telegram:** `http://IP:3000/messages/telegram?to=%NUMBER%&body=%MESSAGE%&session=telegram_XXXX`  
+`%NUMBER%` = `chat_id` de Telegram (usuario o grupo; grupo suele ser negativo). El bot debe estar en el grupo. Copiar URL desde el panel.
 
 ---
 
@@ -178,13 +186,16 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 - **Exclusiva:** solo con `&session=` (cliente que debe recibir siempre del mismo número)
 - Dejar la mayoría dinámicas; exclusiva solo cuando haga falta
 
-### Telegram (bots, independiente de WhatsApp)
-- Panel `/pair` → sección **Telegram** (no toca sesiones Baileys)
-- Archivo: `config/telegram.json` (tokens; **no versionar**)
-- URL Traccar: `http://IP:3000/messages/telegram?to=%NUMBER%&body=%MESSAGE%&session=telegram_XXXX`
-- `to` = `chat_id` de Telegram (usuario o grupo, el grupo puede ser negativo). El bot debe estar en el grupo.
-- Mismos filtros de antigüedad / ráfaga que WhatsApp, en un handler aparte (`/messages/chat` no cambia)
-- Recursos: solo HTTP puntual; no hay WebSocket ni QR
+### Telegram (bots, independiente de WhatsApp) — `b7dfe6a` / `d3cb2c2`
+- Código nuevo: `src/telegram-manager.js`. **No modifica** Baileys ni `/messages/chat`.
+- Panel `/pair` → sección **Telegram** (+ Bot, Probar, Copiar URL, eliminar con PIN). Sin párrafo de ayuda.
+- Tokens en `config/telegram.json` (gitignored). Ejemplo: `config/telegram.example.json`.
+- URL: `/messages/telegram?to=CHAT_ID&body=MENSAJE&session=telegram_XXXX`
+- Un bot = una sesión. Destino = `chat_id` (no número de WhatsApp).
+- Mismos filtros de antigüedad / ráfaga en handler aparte.
+- Liviano: HTTP puntual, sin QR ni WebSocket.
+- Cómo usar: BotFather → token → panel → Probar con tu `chat_id` → copiar URL a Traccar.
+- **Destinos / administrar grupo** (comodidad): lista de chat_id conocidos. Si el bot es **admin** del grupo: cambiar nombre, descripción, generar enlace, expulsar por `user_id`. No crea grupos ni lee el chat. WhatsApp no se toca.
 
 ---
 
@@ -200,7 +211,7 @@ Plantillas en repo: `config/settings.example.json` · `config/settings.halconsof
 | **Proxy Bright Data** | Decidir con stats de uso |
 | **Sesión inexistente sin basura** (opcional) | Traccar TDI (`89.117.17.39`) pegaba a VPS1 con `session=numero_1784301738904` ya borrada → clientes **no** reciben (error sesión). Opción: descartar silencioso. Cortar en Traccar es lo correcto. |
 
-**Resueltos jul–ago 2026:** QR · retry · Problemas · filtro antigüedad · stats Ecuador · alertas admin · silencio Traccar · anti-ráfaga (SOS/ON/OFF + CMA/CMP INGRESO/SALIDA libres; sin aviso admin en esas ráfagas) · geocerca en clave throttle · plantilla no corresponde · historial + sessionId · Baileys 7 rc13 (no rc14) · SSH ambos VPS · backups · update.sh.
+**Resueltos jul–ago 2026:** QR · retry · Problemas · filtro antigüedad · stats Ecuador · alertas admin · silencio Traccar · anti-ráfaga (SOS/ON/OFF + CMA/CMP INGRESO/SALIDA libres; sin aviso admin en esas ráfagas) · geocerca en clave throttle · plantilla no corresponde (tipo en 1.ª línea; CMA/CMP sin “Posible…”) · historial + sessionId · **Telegram bots** (panel + `/messages/telegram`) · Baileys 7 rc13 (no rc14) · SSH ambos VPS · backups · update.sh.
 
 ---
 

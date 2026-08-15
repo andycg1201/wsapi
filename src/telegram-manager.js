@@ -60,6 +60,39 @@ function findBot(sessionId) {
   return bots.find((b) => b.id === sessionId && b.enabled !== false) || null;
 }
 
+function requireBot(sessionId) {
+  const bot = findBot(sessionId);
+  if (!bot) throw new Error(`Sesión Telegram ${sessionId} no existe`);
+  if (!Array.isArray(bot.chats)) bot.chats = [];
+  return bot;
+}
+
+function chatSummary(c) {
+  return {
+    chatId: String(c.chatId),
+    label: c.label || String(c.chatId),
+    type: c.type || 'unknown',
+  };
+}
+
+async function rememberChat(bot, chatId) {
+  const id = String(chatId).trim();
+  if (!id) return;
+  if (!Array.isArray(bot.chats)) bot.chats = [];
+  if (bot.chats.some((c) => String(c.chatId) === id)) return;
+  try {
+    const chat = await telegramCall(bot.token, 'getChat', { chat_id: id });
+    bot.chats.push({
+      chatId: id,
+      label: chat.title || chat.username || chat.first_name || id,
+      type: chat.type || 'unknown',
+    });
+  } catch {
+    bot.chats.push({ chatId: id, label: id, type: 'unknown' });
+  }
+  saveBots();
+}
+
 async function telegramCall(token, method, payload = null) {
   const url = `${TG_API}/bot${token}/${method}`;
   const opts = payload
@@ -118,6 +151,7 @@ export async function getTelegramSessionsStatus() {
       status: info?.ok ? 'online' : 'offline',
       error: info?.ok ? null : (info?.error || 'Token inválido'),
       stats,
+      chatCount: Array.isArray(b.chats) ? b.chats.length : 0,
     });
   }
   return list;
@@ -178,11 +212,117 @@ export async function sendTelegramMessage(chatId, body, sessionId = null) {
   try {
     await telegramCall(bot.token, 'sendMessage', { chat_id: to, text });
     bumpStat(bot.id, 'sent');
+    rememberChat(bot, to).catch(() => {});
     return { success: true, sessionId: bot.id };
   } catch (err) {
     bumpStat(bot.id, 'failed');
     throw new Error(`Telegram: ${err.message}`);
   }
+}
+
+export function listTelegramChats(sessionId) {
+  return requireBot(sessionId).chats.map(chatSummary);
+}
+
+export async function addTelegramChat(sessionId, chatId) {
+  const bot = requireBot(sessionId);
+  const id = String(chatId || '').trim();
+  if (!id) throw new Error('Falta chat_id');
+  if (bot.chats.some((c) => String(c.chatId) === id)) {
+    throw new Error('Ese destino ya está en la lista');
+  }
+  const chat = await telegramCall(bot.token, 'getChat', { chat_id: id });
+  const entry = {
+    chatId: id,
+    label: chat.title || chat.username || chat.first_name || id,
+    type: chat.type || 'unknown',
+  };
+  bot.chats.push(entry);
+  saveBots();
+  return chatSummary(entry);
+}
+
+export function removeTelegramChat(sessionId, chatId) {
+  const bot = requireBot(sessionId);
+  const id = String(chatId || '').trim();
+  const before = bot.chats.length;
+  bot.chats = bot.chats.filter((c) => String(c.chatId) !== id);
+  if (bot.chats.length === before) throw new Error('Destino no está en la lista');
+  saveBots();
+}
+
+export async function getTelegramChatInfo(sessionId, chatId) {
+  const bot = requireBot(sessionId);
+  const id = String(chatId || '').trim();
+  const chat = await telegramCall(bot.token, 'getChat', { chat_id: id });
+  let members = null;
+  try {
+    members = await telegramCall(bot.token, 'getChatMemberCount', { chat_id: id });
+  } catch {
+    members = null;
+  }
+  const botUserId = Number(String(bot.id).replace(/^telegram_/, ''));
+  let botStatus = null;
+  try {
+    const me = await telegramCall(bot.token, 'getChatMember', { chat_id: id, user_id: botUserId });
+    botStatus = me.status || null;
+  } catch {
+    botStatus = null;
+  }
+  const saved = bot.chats.find((c) => String(c.chatId) === id);
+  if (saved) {
+    saved.label = chat.title || chat.username || chat.first_name || saved.label;
+    saved.type = chat.type || saved.type;
+    saveBots();
+  }
+  const isGroup = chat.type === 'group' || chat.type === 'supergroup' || chat.type === 'channel';
+  return {
+    chatId: id,
+    title: chat.title || chat.first_name || id,
+    description: chat.description || '',
+    type: chat.type,
+    username: chat.username ? `@${chat.username}` : null,
+    members,
+    botStatus,
+    canAdmin: isGroup && (botStatus === 'administrator' || botStatus === 'creator'),
+    isGroup,
+  };
+}
+
+export async function setTelegramChatTitle(sessionId, chatId, title) {
+  const bot = requireBot(sessionId);
+  const t = String(title || '').trim();
+  if (!t) throw new Error('Falta el nombre');
+  await telegramCall(bot.token, 'setChatTitle', { chat_id: String(chatId).trim(), title: t.slice(0, 128) });
+  const saved = bot.chats.find((c) => String(c.chatId) === String(chatId).trim());
+  if (saved) {
+    saved.label = t.slice(0, 128);
+    saveBots();
+  }
+}
+
+export async function setTelegramChatDescription(sessionId, chatId, description) {
+  const bot = requireBot(sessionId);
+  await telegramCall(bot.token, 'setChatDescription', {
+    chat_id: String(chatId).trim(),
+    description: String(description || '').slice(0, 255),
+  });
+}
+
+export async function createTelegramInviteLink(sessionId, chatId) {
+  const bot = requireBot(sessionId);
+  const link = await telegramCall(bot.token, 'createChatInviteLink', { chat_id: String(chatId).trim() });
+  return { inviteLink: link.invite_link || link };
+}
+
+export async function kickTelegramMember(sessionId, chatId, userId) {
+  const bot = requireBot(sessionId);
+  const uid = String(userId || '').trim();
+  if (!/^-?\d+$/.test(uid)) throw new Error('user_id inválido (solo números)');
+  await telegramCall(bot.token, 'banChatMember', {
+    chat_id: String(chatId).trim(),
+    user_id: Number(uid),
+  });
 }
 
 loadTelegramConfig();

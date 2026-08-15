@@ -36,6 +36,14 @@ import {
   addTelegramBot,
   removeTelegramBot,
   sendTelegramMessage,
+  listTelegramChats,
+  addTelegramChat,
+  removeTelegramChat,
+  getTelegramChatInfo,
+  setTelegramChatTitle,
+  setTelegramChatDescription,
+  createTelegramInviteLink,
+  kickTelegramMember,
 } from './telegram-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -379,6 +387,17 @@ const pairHandler = async (request, reply) => {
       <div style="padding:1rem; border-top:1px solid #e5e7eb; display:flex; gap:0.5rem;">
         <button onclick="document.getElementById('tgTestModal').classList.remove('show')">Cancelar</button>
         <button id="tgTestSend" class="btn-add-tg">Enviar prueba</button>
+      </div>
+    </div>
+  </div>
+  <div id="tgChatsModal" class="modal">
+    <div class="modal-inner" style="max-width:560px;">
+      <h3 id="tgChatsTitle">Destinos Telegram</h3>
+      <div class="modal-body" id="tgChatsBody">
+        <p>Cargando...</p>
+      </div>
+      <div style="padding:1rem; border-top:1px solid #e5e7eb;">
+        <button onclick="document.getElementById('tgChatsModal').classList.remove('show')">Cerrar</button>
       </div>
     </div>
   </div>
@@ -743,6 +762,7 @@ const pairHandler = async (request, reply) => {
         html += '<div class="session ' + (st === 'online' ? 'connected' : 'pending') + '">' +
           '<span class="session-content">' + pill + ' ' + display +
           ' <button class="btn-copy tg-copy" data-url="' + escapeHtml(url) + '">Copiar URL Traccar</button>' +
+          ' <button class="btn-groups tg-chats" data-id="' + escapeHtml(s.id) + '">Destinos' + (s.chatCount ? ' (' + s.chatCount + ')' : '') + '</button>' +
           ' <button class="btn-add-tg tg-test" data-id="' + escapeHtml(s.id) + '">Probar</button>' +
           '<div class="tg-url" style="margin-top:0.35rem;">' + escapeHtml(s.id) + ' · token ' + escapeHtml(s.tokenMasked || '') + '</div>' +
           '</span><button class="btn-delete tg-del" data-id="' + escapeHtml(s.id) + '" title="Eliminar">🗑</button></div>';
@@ -763,6 +783,9 @@ const pairHandler = async (request, reply) => {
           document.getElementById('tgTestErr').innerHTML = '';
           document.getElementById('tgTestModal').classList.add('show');
         };
+      });
+      div.querySelectorAll('.tg-chats').forEach(function(b) {
+        b.onclick = function() { showTelegramChats(b.getAttribute('data-id')); };
       });
       div.querySelectorAll('.tg-del').forEach(function(b) {
         b.onclick = function() { showDeleteModal(b.getAttribute('data-id'), 'tg'); };
@@ -828,6 +851,140 @@ const pairHandler = async (request, reply) => {
         err.innerHTML = '<span class="msg err">Error</span>';
       });
     };
+    var tgChatsSessionId = null;
+    function showTelegramChats(sessionId) {
+      tgChatsSessionId = sessionId;
+      document.getElementById('tgChatsTitle').textContent = 'Destinos · ' + sessionId;
+      document.getElementById('tgChatsModal').classList.add('show');
+      renderTelegramChatsList();
+    }
+    function renderTelegramChatsList() {
+      var body = document.getElementById('tgChatsBody');
+      body.innerHTML = '<p>Cargando...</p>';
+      fetch('/api/telegram/' + encodeURIComponent(tgChatsSessionId) + '/chats').then(function(r) { return r.json(); }).then(function(data) {
+        if (data.error) {
+          body.innerHTML = '<p class="msg err">' + escapeHtml(data.error) + '</p>';
+          return;
+        }
+        var chats = data.chats || [];
+        var html = '<p style="margin:0 0 0.5rem 0;font-size:0.85rem;color:#6b7280;">Grupos o chats donde el bot ya está. El grupo se crea en Telegram; aquí solo lo administras.</p>';
+        html += '<div style="display:flex;gap:0.4rem;margin-bottom:0.75rem;">' +
+          '<input id="tgNewChatId" placeholder="chat_id del grupo o usuario" style="flex:1;padding:0.45rem;border:1px solid #ccc;border-radius:4px;" />' +
+          '<button id="tgAddChatBtn" class="btn-add-tg">Añadir</button></div>' +
+          '<div id="tgChatAddErr"></div>';
+        if (chats.length === 0) {
+          html += '<p style="color:#9ca3af;font-size:0.9rem;">Ninguno aún. Añade el chat_id o envía una prueba.</p>';
+        }
+        for (var i = 0; i < chats.length; i++) {
+          var c = chats[i];
+          html += '<div class="group-row">' +
+            '<div><strong>' + escapeHtml(c.label) + '</strong>' +
+            '<div class="group-id">' + escapeHtml(c.chatId) + (c.type ? ' · ' + escapeHtml(c.type) : '') + '</div></div>' +
+            '<button class="btn-add-tg tg-admin" data-chat="' + escapeHtml(c.chatId) + '">Administrar</button>' +
+            '<button class="btn-copy tg-forget" data-chat="' + escapeHtml(c.chatId) + '">Quitar</button></div>';
+        }
+        body.innerHTML = html;
+        document.getElementById('tgAddChatBtn').onclick = function() {
+          var id = document.getElementById('tgNewChatId').value.trim();
+          var err = document.getElementById('tgChatAddErr');
+          err.innerHTML = '';
+          if (!id) { err.innerHTML = '<span class="msg err">Falta chat_id</span>'; return; }
+          fetch('/api/telegram/' + encodeURIComponent(tgChatsSessionId) + '/chats', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chatId: id })
+          }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.error) { err.innerHTML = '<span class="msg err">' + escapeHtml(d.error) + '</span>'; return; }
+            renderTelegramChatsList();
+            loadTelegram();
+          }).catch(function() { err.innerHTML = '<span class="msg err">Error</span>'; });
+        };
+        body.querySelectorAll('.tg-admin').forEach(function(b) {
+          b.onclick = function() { renderTelegramChatAdmin(b.getAttribute('data-chat')); };
+        });
+        body.querySelectorAll('.tg-forget').forEach(function(b) {
+          b.onclick = function() {
+            fetch('/api/telegram/' + encodeURIComponent(tgChatsSessionId) + '/chats/' + encodeURIComponent(b.getAttribute('data-chat')), { method: 'DELETE' })
+              .then(function() { renderTelegramChatsList(); loadTelegram(); });
+          };
+        });
+      }).catch(function() {
+        body.innerHTML = '<p class="msg err">Error al cargar destinos.</p>';
+      });
+    }
+    function renderTelegramChatAdmin(chatId) {
+      var body = document.getElementById('tgChatsBody');
+      body.innerHTML = '<p>Cargando...</p>';
+      fetch('/api/telegram/' + encodeURIComponent(tgChatsSessionId) + '/chats/' + encodeURIComponent(chatId)).then(function(r) { return r.json(); }).then(function(info) {
+        if (info.error) {
+          body.innerHTML = '<p class="msg err">' + escapeHtml(info.error) + '</p>' +
+            '<p><button class="btn-copy" id="tgAdminBack">Volver</button></p>';
+          document.getElementById('tgAdminBack').onclick = renderTelegramChatsList;
+          return;
+        }
+        var warn = '';
+        if (!info.isGroup) warn = '<p class="msg err">Esto es un chat privado. Nombre, enlace y expulsar solo aplican a grupos.</p>';
+        else if (!info.canAdmin) warn = '<p class="msg err">El bot no es administrador de este grupo. Dale admin en Telegram para poder editar.</p>';
+        var html = '<p><button class="btn-copy" id="tgAdminBack">← Destinos</button></p>' +
+          '<p style="margin:0.4rem 0;"><strong>' + escapeHtml(info.title) + '</strong> · ' + escapeHtml(info.type || '') +
+          (info.members != null ? ' · ' + info.members + ' miembros' : '') + '</p>' +
+          '<div class="group-id" style="margin-bottom:0.6rem;">' + escapeHtml(info.chatId) + '</div>' + warn +
+          '<label style="font-size:0.85rem;">Nombre</label>' +
+          '<div style="display:flex;gap:0.4rem;margin:0.2rem 0 0.6rem 0;">' +
+          '<input id="tgAdmTitle" value="' + escapeHtml(info.title || '') + '" style="flex:1;padding:0.45rem;border:1px solid #ccc;border-radius:4px;" />' +
+          '<button class="btn-add-tg" id="tgSaveTitle">Guardar</button></div>' +
+          '<label style="font-size:0.85rem;">Descripción</label>' +
+          '<div style="display:flex;gap:0.4rem;margin:0.2rem 0 0.6rem 0;">' +
+          '<input id="tgAdmDesc" value="' + escapeHtml(info.description || '') + '" style="flex:1;padding:0.45rem;border:1px solid #ccc;border-radius:4px;" />' +
+          '<button class="btn-add-tg" id="tgSaveDesc">Guardar</button></div>' +
+          '<label style="font-size:0.85rem;">Enlace de invitación</label>' +
+          '<div style="display:flex;gap:0.4rem;margin:0.2rem 0 0.6rem 0;">' +
+          '<input id="tgAdmLink" readonly placeholder="Pulsa Generar" style="flex:1;padding:0.45rem;border:1px solid #ccc;border-radius:4px;" />' +
+          '<button class="btn-add-tg" id="tgGenLink">Generar</button>' +
+          '<button class="btn-copy" id="tgCopyLink">Copiar</button></div>' +
+          '<label style="font-size:0.85rem;">Expulsar (user_id numérico, ej. de @userinfobot)</label>' +
+          '<div style="display:flex;gap:0.4rem;margin:0.2rem 0 0.4rem 0;">' +
+          '<input id="tgKickId" placeholder="123456789" style="flex:1;padding:0.45rem;border:1px solid #ccc;border-radius:4px;" />' +
+          '<button id="tgKickBtn" style="background:#dc2626;color:white;border:none;border-radius:6px;padding:0.3rem 0.7rem;cursor:pointer;">Expulsar</button></div>' +
+          '<div id="tgAdmMsg"></div>';
+        body.innerHTML = html;
+        document.getElementById('tgAdminBack').onclick = renderTelegramChatsList;
+        function admMsg(ok, text) {
+          document.getElementById('tgAdmMsg').innerHTML = '<span class="msg ' + (ok ? 'ok' : 'err') + '">' + escapeHtml(text) + '</span>';
+        }
+        function admPost(path, payload, okText) {
+          fetch('/api/telegram/' + encodeURIComponent(tgChatsSessionId) + '/chats/' + encodeURIComponent(chatId) + '/' + path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload || {})
+          }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.error) { admMsg(false, d.error); return; }
+            if (d.inviteLink) document.getElementById('tgAdmLink').value = d.inviteLink;
+            admMsg(true, okText || 'Listo');
+          }).catch(function() { admMsg(false, 'Error'); });
+        }
+        document.getElementById('tgSaveTitle').onclick = function() {
+          admPost('title', { title: document.getElementById('tgAdmTitle').value }, 'Nombre actualizado');
+        };
+        document.getElementById('tgSaveDesc').onclick = function() {
+          admPost('description', { description: document.getElementById('tgAdmDesc').value }, 'Descripción actualizada');
+        };
+        document.getElementById('tgGenLink').onclick = function() { admPost('invite', {}, 'Enlace generado'); };
+        document.getElementById('tgCopyLink').onclick = function() {
+          var v = document.getElementById('tgAdmLink').value;
+          if (!v) { admMsg(false, 'Genera el enlace primero'); return; }
+          navigator.clipboard.writeText(v).then(function() { admMsg(true, 'Enlace copiado'); });
+        };
+        document.getElementById('tgKickBtn').onclick = function() {
+          var uid = document.getElementById('tgKickId').value.trim();
+          if (!uid) { admMsg(false, 'Falta user_id'); return; }
+          if (!confirm('¿Expulsar a ' + uid + ' de este grupo?')) return;
+          admPost('kick', { userId: uid }, 'Usuario expulsado');
+        };
+      }).catch(function() {
+        body.innerHTML = '<p class="msg err">Error al cargar el chat.</p>';
+      });
+    }
     loadSessions();
     loadTelegram();
     var refreshId = setInterval(function() {
@@ -949,6 +1106,67 @@ fastify.post('/api/telegram/:id/test', async (request, reply) => {
     if (!to) return reply.status(400).send({ error: 'Falta chat_id (to)' });
     const result = await sendTelegramMessage(to, 'Prueba WSAPI Telegram — si ves esto, el bot está bien.', request.params.id);
     return reply.send({ success: true, sessionId: result.sessionId });
+  } catch (err) {
+    return reply.status(400).send({ error: err.message });
+  }
+});
+fastify.get('/api/telegram/:id/chats', async (request, reply) => {
+  try {
+    return { chats: listTelegramChats(request.params.id) };
+  } catch (err) {
+    return reply.status(400).send({ error: err.message });
+  }
+});
+fastify.post('/api/telegram/:id/chats', async (request, reply) => {
+  try {
+    const chat = await addTelegramChat(request.params.id, request.body?.chatId || request.body?.to);
+    return { success: true, chat };
+  } catch (err) {
+    return reply.status(400).send({ error: err.message });
+  }
+});
+fastify.delete('/api/telegram/:id/chats/:chatId', async (request, reply) => {
+  try {
+    removeTelegramChat(request.params.id, request.params.chatId);
+    return { success: true };
+  } catch (err) {
+    return reply.status(400).send({ error: err.message });
+  }
+});
+fastify.get('/api/telegram/:id/chats/:chatId', async (request, reply) => {
+  try {
+    return await getTelegramChatInfo(request.params.id, request.params.chatId);
+  } catch (err) {
+    return reply.status(400).send({ error: err.message });
+  }
+});
+fastify.post('/api/telegram/:id/chats/:chatId/title', async (request, reply) => {
+  try {
+    await setTelegramChatTitle(request.params.id, request.params.chatId, request.body?.title);
+    return { success: true };
+  } catch (err) {
+    return reply.status(400).send({ error: err.message });
+  }
+});
+fastify.post('/api/telegram/:id/chats/:chatId/description', async (request, reply) => {
+  try {
+    await setTelegramChatDescription(request.params.id, request.params.chatId, request.body?.description);
+    return { success: true };
+  } catch (err) {
+    return reply.status(400).send({ error: err.message });
+  }
+});
+fastify.post('/api/telegram/:id/chats/:chatId/invite', async (request, reply) => {
+  try {
+    return { success: true, ...(await createTelegramInviteLink(request.params.id, request.params.chatId)) };
+  } catch (err) {
+    return reply.status(400).send({ error: err.message });
+  }
+});
+fastify.post('/api/telegram/:id/chats/:chatId/kick', async (request, reply) => {
+  try {
+    await kickTelegramMember(request.params.id, request.params.chatId, request.body?.userId);
+    return { success: true };
   } catch (err) {
     return reply.status(400).send({ error: err.message });
   }
